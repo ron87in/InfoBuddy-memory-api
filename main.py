@@ -12,15 +12,15 @@
         return psycopg2.connect(DATABASE_URL, sslmode='require')
 
     # Initialize database table
-    def init_db():
+     def init_db():
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute('''
-                    CREATE TABLE IF NOT EXISTS memory (
-                        topic TEXT PRIMARY KEY,
-                        details TEXT
-                    )
-                ''')
+                cursor.execute("""
+                                CREATE TABLE IF NOT EXISTS memory (
+                                    topic TEXT PRIMARY KEY,
+                                    details TEXT
+                                )
+                            """)
                 conn.commit()
 
     # Save a memory and log it
