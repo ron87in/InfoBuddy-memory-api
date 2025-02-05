@@ -23,7 +23,7 @@ def init_db():
                     topic TEXT PRIMARY KEY,
                     details TEXT
                 );
-            """)
+            """)  # ✅ Fixed Syntax
             conn.commit()
 
 # Route to Save a Memory
@@ -74,4 +74,3 @@ def recall():
 if __name__ == '__main__':
     init_db()
     app.run(host='0.0.0.0', port=8080)
-    
