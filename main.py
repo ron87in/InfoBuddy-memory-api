@@ -1,4 +1,60 @@
 from flask import Flask, request, jsonify
+import sqlite3
+
+app = Flask(__name__)
+DB_FILE = "infobuddy_memory.db"  # SQLite Database File
+
+# Function to initialize database
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS memory (topic TEXT PRIMARY KEY, details TEXT)''')
+        conn.commit()
+
+# Function to save memory
+def save_memory(topic, details):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO memory (topic, details) VALUES (?, ?)", (topic, details))
+        conn.commit()
+
+# Function to load memory
+def load_memory(topic):
+    with sqlite3.connect(DB_FILE) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT details FROM memory WHERE topic = ?", (topic,))
+        result = cursor.fetchone()
+        return result[0] if result else "No memory found."
+
+@app.route('/remember', methods=['POST'])
+def remember():
+    data = request.json
+    topic = data.get("topic")
+    details = data.get("details")
+
+    if not topic or not details:
+        return jsonify({"error": "Both 'topic' and 'details' are required"}), 400
+
+    save_memory(topic, details)
+    return jsonify({"message": "Memory saved successfully"}), 200
+
+@app.route('/recall', methods=['GET'])
+def recall():
+    topic = request.args.get("topic")
+    if not topic:
+        return jsonify({"error": "Topic is required"}), 400
+
+    details = load_memory(topic)
+    return jsonify({"memory": details}), 200
+
+if __name__ == '__main__':
+    init_db()  # Initialize the database at startup
+    app.run(host="0.0.0.0", port=8080)
+
+
+
+
+'''from flask import Flask, request, jsonify    #used json file
 import json
 import os
 
@@ -43,10 +99,10 @@ def recall():
     return jsonify({"memory": details}), 200
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=8080)'''
 
 
-'''import json
+'''import json    #worked without running on another server
 import os
 from flask import Flask, request, jsonify
 
