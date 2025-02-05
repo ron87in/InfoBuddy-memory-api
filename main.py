@@ -18,12 +18,9 @@ def get_db_connection():
 def init_db():
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS memory (
-                    topic TEXT PRIMARY KEY,
-                    details TEXT
-                );
-            """)  # ✅ Fixed Syntax
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS memory (topic TEXT PRIMARY KEY, details TEXT);"
+            )  # ✅ Fixed syntax for PostgreSQL
             conn.commit()
 
 # Route to Save a Memory
@@ -39,11 +36,10 @@ def remember():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("""
-                    INSERT INTO memory (topic, details)
-                    VALUES (%s, %s)
-                    ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details;
-                """, (topic, details))
+                cursor.execute(
+                    "INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details;",
+                    (topic, details),
+                )
                 conn.commit()
         return jsonify({"message": "Memory saved successfully!"})
     except Exception as e:
@@ -72,5 +68,5 @@ def recall():
 
 # Main Execution
 if __name__ == '__main__':
-    init_db()
+    init_db()  # ✅ Ensure database initializes properly
     app.run(host='0.0.0.0', port=8080)
