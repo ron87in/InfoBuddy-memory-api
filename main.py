@@ -1,67 +1,73 @@
-from flask import Flask, request, jsonify
-import psycopg2
-import os
+    from flask import Flask, request, jsonify
+    import psycopg2
+    import os
 
-app = Flask(__name__)
+    app = Flask(__name__)
 
-# Load database URL from Render environment variables
-DATABASE_URL = os.getenv("DATABASE_URL")
+    # Load database URL from Render environment variables
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Function to connect to PostgreSQL
-def get_db_connection():
-    return psycopg2.connect(DATABASE_URL, sslmode='require')
+    # Function to connect to PostgreSQL
+    def get_db_connection():
+        return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-# Initialize database table
-def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS memory (
-                    topic TEXT PRIMARY KEY,
-                    details TEXT
-                )
-            ''')
-            conn.commit()
+    # Initialize database table
+    def init_db():
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS memory (
+                        topic TEXT PRIMARY KEY,
+                        details TEXT
+                    )
+                ''')
+                conn.commit()
 
-# Save a memory
-def save_memory(topic, details):
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details", (topic, details))
-            conn.commit()
+    # Save a memory and log it
+    def save_memory(topic, details):
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details", (topic, details))
+                conn.commit()
+                print(f"✅ Memory Saved: Topic='{topic}', Details='{details}'")  # **LOGGING MEMORY STORAGE**
 
-# Retrieve a memory
-def load_memory(topic):
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT details FROM memory WHERE topic = %s", (topic,))
-            result = cursor.fetchone()
-            return result[0] if result else "No memory found."
+    # Retrieve a memory and log it
+    def load_memory(topic):
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT details FROM memory WHERE topic = %s", (topic,))
+                result = cursor.fetchone()
+                if result:
+                    print(f"🔎 Memory Retrieved: Topic='{topic}', Details='{result[0]}'")  # **LOGGING MEMORY RETRIEVAL**
+                    return result[0]
+                else:
+                    print(f"⚠️ Memory Not Found: Topic='{topic}'")  # **LOGGING FAILURE**
+                    return "No memory found."
 
-@app.route('/remember', methods=['POST'])
-def remember():
-    data = request.json
-    topic = data.get("topic")
-    details = data.get("details")
+    @app.route('/remember', methods=['POST'])
+    def remember():
+        data = request.json
+        topic = data.get("topic")
+        details = data.get("details")
 
-    if not topic or not details:
-        return jsonify({"error": "Both 'topic' and 'details' are required"}), 400
+        if not topic or not details:
+            return jsonify({"error": "Both 'topic' and 'details' are required"}), 400
 
-    save_memory(topic, details)
-    return jsonify({"message": "Memory saved successfully"}), 200
+        save_memory(topic, details)
+        return jsonify({"message": "Memory saved successfully"}), 200
 
-@app.route('/recall', methods=['GET'])
-def recall():
-    topic = request.args.get("topic")
-    if not topic:
-        return jsonify({"error": "Topic is required"}), 400
+    @app.route('/recall', methods=['GET'])
+    def recall():
+        topic = request.args.get("topic")
+        if not topic:
+            return jsonify({"error": "Topic is required"}), 400
 
-    details = load_memory(topic)
-    return jsonify({"memory": details}), 200
+        details = load_memory(topic)
+        return jsonify({"memory": details}), 200
 
-if __name__ == '__main__':
-    init_db()  # Initialize the database at startup
-    app.run(host="0.0.0.0", port=8080)
+    if __name__ == '__main__':
+        init_db()  # Initialize the database at startup
+        app.run(host="0.0.0.0", port=8080)
 
 '''
 from flask import Flask, request, jsonify
