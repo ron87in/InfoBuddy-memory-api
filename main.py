@@ -1,72 +1,96 @@
-from flask import Flask, request, jsonify
-import psycopg2
-import os
+    import os
+    import psycopg2
+    import json
+    from flask import Flask, request, jsonify
 
-app = Flask(__name__)
+    app = Flask(__name__)
 
-# Database Connection Function
-def get_db_connection():
-    return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT")
-    )
+    # Get the PostgreSQL Database URL from environment variables (set this in Render)
+    DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Initialize Database
-def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "CREATE TABLE IF NOT EXISTS memory (topic TEXT PRIMARY KEY, details TEXT);"
-            )  # ✅ Fixed syntax for PostgreSQL
+    # Function to connect to the PostgreSQL database
+    def get_db_connection():
+        return psycopg2.connect(DATABASE_URL, sslmode="require")
+
+    # Initialize the database and create the table if it doesn't exist
+    def init_db():
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS memory (
+                topic TEXT PRIMARY KEY,
+                details TEXT
+            )
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+    # Initialize the database when the API starts
+    init_db()
+
+    # Route to store a memory
+    @app.route('/remember', methods=['POST'])
+    def remember():
+        try:
+            data = request.get_json()
+            topic = data.get("topic")
+            details = data.get("details")
+
+            if not topic or not details:
+                return jsonify({"error": "Missing topic or details"}), 400
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            # Insert or update memory in the database
+            cursor.execute('''
+                INSERT INTO memory (topic, details) 
+                VALUES (%s, %s) 
+                ON CONFLICT (topic) 
+                DO UPDATE SET details = EXCLUDED.details
+            ''', (topic, details))
+
             conn.commit()
+            cursor.close()
+            conn.close()
 
-# Route to Save a Memory
-@app.route('/remember', methods=['POST'])
-def remember():
-    data = request.json
-    topic = data.get("topic")
-    details = data.get("details")
+            return jsonify({"message": f"Memory saved for topic '{topic}'"}), 200
 
-    if not topic or not details:
-        return jsonify({"error": "Missing topic or details"}), 400
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details;",
-                    (topic, details),
-                )
-                conn.commit()
-        return jsonify({"message": "Memory saved successfully!"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Route to recall a memory
+    @app.route('/recall', methods=['GET'])
+    def recall():
+        try:
+            topic = request.args.get("topic")
 
-# Route to Recall a Memory
-@app.route('/recall', methods=['GET'])
-def recall():
-    topic = request.args.get("topic")
+            if not topic:
+                return jsonify({"error": "Topic is required"}), 400
 
-    if not topic:
-        return jsonify({"error": "Missing topic parameter"}), 400
+            conn = get_db_connection()
+            cursor = conn.cursor()
 
-    try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT details FROM memory WHERE topic = %s;", (topic,))
-                result = cursor.fetchone()
+            cursor.execute('SELECT details FROM memory WHERE topic = %s', (topic,))
+            result = cursor.fetchone()
 
-        if result:
-            return jsonify({"memory": result[0]})
-        else:
-            return jsonify({"memory": "No memory found."}), 404
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            cursor.close()
+            conn.close()
 
-# Main Execution
-if __name__ == '__main__':
-    init_db()  # ✅ Ensure database initializes properly
-    app.run(host='0.0.0.0', port=8080)
+            if result:
+                return jsonify({"memory": result[0]}), 200
+            else:
+                return jsonify({"memory": "No memory found"}), 404
+
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+    # Home route for testing
+    @app.route('/', methods=['GET'])
+    def home():
+        return jsonify({"message": "InfoBuddy Memory API is running!"}), 200
+
+    # Run the Flask application
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=8080)
