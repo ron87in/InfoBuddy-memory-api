@@ -4,40 +4,28 @@ import os
 
 app = Flask(__name__)
 
-# Database connection settings (Replace with your actual Render PostgreSQL database URL)
-DATABASE_URL = os.getenv("DATABASE_URL")  # Ensure this is set in Render
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL is not set!")
+# Retrieve API Key from environment variable
+API_KEY = os.getenv("API_KEY")
 
+# Database connection function
 def get_db_connection():
-    """ Establishes a connection to the PostgreSQL database """
-    conn = psycopg2.connect(DATABASE_URL, sslmode="require")
-    return conn
+    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
-# Initialize the database (Create the table if it doesn't exist)
-def init_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS memory (
-            topic TEXT PRIMARY KEY,
-            details TEXT
-        )
-    """)
-    conn.commit()
-    cursor.close()
-    conn.close()
+# Middleware to check API Key
+def verify_api_key():
+    key = request.headers.get("X-API-KEY")
+    if key != API_KEY:
+        return jsonify({"error": "Unauthorized access"}), 403
 
-# API Route to Save a Memory
+# Endpoint to save memory
 @app.route("/remember", methods=["POST"])
 def remember():
-    """ Stores a new memory in the database """
+    error = verify_api_key()
+    if error: return error  # Deny request if API key is wrong
+
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
-
-    if not topic or not details:
-        return jsonify({"error": "Missing topic or details"}), 400
 
     try:
         conn = get_db_connection()
@@ -46,18 +34,17 @@ def remember():
         conn.commit()
         cursor.close()
         conn.close()
-        return jsonify({"message": f"Memory stored for {topic}"}), 200
+        return jsonify({"status": "Memory saved"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# API Route to Recall a Memory
+# Endpoint to recall memory
 @app.route("/recall", methods=["GET"])
 def recall():
-    """ Retrieves a stored memory from the database """
-    topic = request.args.get("topic")
-    if not topic:
-        return jsonify({"error": "Missing topic parameter"}), 400
+    error = verify_api_key()
+    if error: return error  # Deny request if API key is wrong
 
+    topic = request.args.get("topic")
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -65,22 +52,20 @@ def recall():
         result = cursor.fetchone()
         cursor.close()
         conn.close()
-
-        if result:
-            return jsonify({"memory": result[0]}), 200
-        else:
-            return jsonify({"memory": "No memory found"}), 404
+        return jsonify({"memory": result[0] if result else "No memory found"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# API Route to Keep Database Awake (For UptimeRobot)
+# Endpoint to keep database awake
 @app.route("/ping-db", methods=["GET"])
 def ping_db():
-    """ Pings the database to keep it awake """
+    error = verify_api_key()
+    if error: return error  # Deny request if API key is wrong
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT 1")  # Simple query
+        cursor.execute("SELECT 1")
         conn.commit()
         cursor.close()
         conn.close()
@@ -88,7 +73,6 @@ def ping_db():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Initialize the database when the app starts
+# Initialize database (if needed)
 if __name__ == "__main__":
-    init_db()
     app.run(host="0.0.0.0", port=8080)
