@@ -32,18 +32,24 @@ def remember():
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
-    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).isoformat()
+    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
-    print(f"DEBUG: Saving memory - topic={topic}, details={details}, timestamp={timestamp_utc}")
+    print(f"DEBUG: Attempting to store memory - topic={topic}, details={details}, timestamp={timestamp_utc}")
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
         # Ensure the timestamp column exists
-        cursor.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT NOW();")
+        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'memory' AND column_name = 'timestamp';")
+        column_exists = cursor.fetchone()
 
-        # Force-insert a timestamp even if updating
+        if not column_exists:
+            print("DEBUG: Adding missing timestamp column...")
+            cursor.execute("ALTER TABLE memory ADD COLUMN timestamp TIMESTAMP DEFAULT NOW();")
+            conn.commit()
+
+        # Insert the memory with timestamp
         cursor.execute(
             """
             INSERT INTO memory (topic, details, timestamp) 
@@ -58,8 +64,9 @@ def remember():
         cursor.close()
         conn.close()
 
-        print(f"DEBUG: Memory successfully saved - {topic}, {timestamp_utc}")
-        return jsonify({"status": "Memory saved", "timestamp": timestamp_utc}), 200
+        print(f"DEBUG: Successfully stored memory - topic={topic}, timestamp={timestamp_utc}")
+        return jsonify({"status": "Memory saved", "timestamp": timestamp_utc.isoformat()}), 200
+
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
