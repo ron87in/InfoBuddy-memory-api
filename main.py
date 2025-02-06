@@ -70,9 +70,14 @@ def remember():
     error = verify_api_key()
     if error: return error  # Deny request if API key is wrong
 
+    print(f"DEBUG: Received Headers -> {dict(request.headers)}")
+
     if not request.is_json:
-        print("ERROR: Request must be JSON")
-        return jsonify({"error": "Request must be JSON"}), 415
+        print("ERROR: Request must be JSON, received:", request.headers.get("Content-Type"))
+        return jsonify({
+            "error": "Request must be JSON",
+            "received_content_type": request.headers.get("Content-Type")
+        }), 415
 
     data = request.json
     topic = data.get("topic")
@@ -114,12 +119,17 @@ def recall():
         print("DEBUG: API Key check failed in /recall")
         return error  # Deny request if API key is wrong
 
-    topic = request.args.get("topic")
     print(f"DEBUG: Recall request received - Raw Query Params -> {request.args}")
+    print(f"DEBUG: Received Headers -> {dict(request.headers)}")
+
+    topic = request.args.get("topic")
 
     if not topic:
         print("ERROR: Missing 'topic' parameter in /recall")
-        return jsonify({"error": "Missing 'topic' query parameter"}), 400
+        return jsonify({
+            "error": "Missing 'topic' query parameter",
+            "received_query_params": dict(request.args)
+        }), 400
 
     try:
         conn = get_db_connection()
