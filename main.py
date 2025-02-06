@@ -70,6 +70,10 @@ def remember():
     error = verify_api_key()
     if error: return error  # Deny request if API key is wrong
 
+    if not request.is_json:
+        print("ERROR: Request must be JSON")
+        return jsonify({"error": "Request must be JSON"}), 415
+
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
@@ -81,7 +85,6 @@ def remember():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # Insert the memory with timestamp
         cursor.execute(
             """
             INSERT INTO memory (topic, details, timestamp) 
@@ -112,9 +115,8 @@ def recall():
         return error  # Deny request if API key is wrong
 
     topic = request.args.get("topic")
-    print(f"DEBUG: Received recall request - topic='{topic}'")
+    print(f"DEBUG: Recall request received - Raw Query Params -> {request.args}")
 
-    # Check if topic is missing
     if not topic:
         print("ERROR: Missing 'topic' parameter in /recall")
         return jsonify({"error": "Missing 'topic' query parameter"}), 400
