@@ -18,6 +18,30 @@ else:
 def get_db_connection():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
 
+# Ensure the memory table has a timestamp column
+def ensure_timestamp_column():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if the column exists
+        cursor.execute("""
+            SELECT column_name FROM information_schema.columns 
+            WHERE table_name = 'memory' AND column_name = 'timestamp';
+        """)
+        column_exists = cursor.fetchone()
+
+        if not column_exists:
+            print("DEBUG: Adding missing timestamp column...")
+            cursor.execute("ALTER TABLE memory ADD COLUMN timestamp TIMESTAMP DEFAULT NOW();")
+            conn.commit()
+            print("DEBUG: Timestamp column successfully added.")
+
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"ERROR: Could not ensure timestamp column exists: {e}")
+
 # Middleware to check API Key
 def verify_api_key():
     key = request.headers.get("X-API-KEY")
@@ -43,15 +67,6 @@ def remember():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        # Ensure the timestamp column exists
-        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'memory' AND column_name = 'timestamp';")
-        column_exists = cursor.fetchone()
-
-        if not column_exists:
-            print("DEBUG: Adding missing timestamp column...")
-            cursor.execute("ALTER TABLE memory ADD COLUMN timestamp TIMESTAMP DEFAULT NOW();")
-            conn.commit()
 
         # Insert the memory with timestamp
         cursor.execute(
@@ -159,6 +174,7 @@ def ping_db():
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Initialize database (if needed)
+# Initialize database (ensure timestamp column exists before running the app)
 if __name__ == "__main__":
+    ensure_timestamp_column()
     app.run(host="0.0.0.0", port=8080)
