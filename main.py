@@ -32,22 +32,29 @@ def remember():
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
-    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).isoformat()
     timestamp_central = timestamp_utc.astimezone(CENTRAL_TZ).isoformat()
+
+    print(f"DEBUG: Saving memory: topic={topic}, details={details}, timestamp={timestamp_utc}")  # Logs for Render
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
+            "ALTER TABLE memory ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT NOW();"
+        )
+        cursor.execute(
             "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, %s) "
-            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp",
-            (topic, details, timestamp_utc.isoformat())
+            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = NOW();",
+            (topic, details, timestamp_utc)
         )
         conn.commit()
         cursor.close()
         conn.close()
+        print(f"DEBUG: Memory successfully saved in database.")
         return jsonify({"status": "Memory saved", "timestamp_central": timestamp_central}), 200
     except Exception as e:
+        print(f"ERROR: {str(e)}")  # Logs error in Render
         return jsonify({"error": str(e)}), 500
 
 # Endpoint to recall memory with conversational timestamp
@@ -77,6 +84,7 @@ def recall():
         else:
             return jsonify({"memory": "No memory found"}), 200
     except Exception as e:
+        print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Endpoint to keep database awake
@@ -94,6 +102,7 @@ def ping_db():
         conn.close()
         return jsonify({"status": "Database is awake"}), 200
     except Exception as e:
+        print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Initialize database (if needed)
