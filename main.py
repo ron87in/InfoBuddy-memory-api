@@ -45,11 +45,13 @@ def remember():
     error = verify_api_key()
     if error: return error  # Deny request if API key is wrong
 
-    print(f"DEBUG: Received Headers -> {dict(request.headers)}")
+    print(f"DEBUG: Received POST /remember request")
+    print(f"DEBUG: Headers -> {dict(request.headers)}")
     print(f"DEBUG: Content-Type Received -> {request.headers.get('Content-Type')}")
 
     try:
         data = request.get_json(force=True)  # Force JSON parsing even if Content-Type is wrong
+        print(f"DEBUG: Parsed JSON Payload -> {data}")
     except Exception as e:
         print(f"ERROR: Failed to parse JSON - {str(e)}")
         return jsonify({"error": "Invalid JSON format"}), 400
@@ -77,6 +79,7 @@ def remember():
         conn.close()
         return jsonify({"status": "Memory saved"}), 200
     except Exception as e:
+        print(f"ERROR: Exception in /remember -> {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Endpoint to recall memory with timestamp
@@ -85,10 +88,13 @@ def recall():
     error = verify_api_key()
     if error: return error  # Deny request if API key is wrong
 
-    print(f"DEBUG: Recall request received - Raw Query Params -> {request.args}")
+    print(f"DEBUG: Received GET /recall request")
+    print(f"DEBUG: Headers -> {dict(request.headers)}")
+    print(f"DEBUG: Query Params -> {request.args}")
 
     topic = request.args.get("topic")
     if not topic:
+        print("ERROR: Missing 'topic' parameter in /recall")
         return jsonify({
             "error": "Missing 'topic' query parameter",
             "received_query_params": dict(request.args)
@@ -109,8 +115,10 @@ def recall():
                 "timestamp": timestamp_utc.isoformat() if timestamp_utc else "No timestamp available"
             }), 200
         else:
+            print("DEBUG: No memory found for topic")
             return jsonify({"memory": "No memory found"}), 200
     except Exception as e:
+        print(f"ERROR: Exception in /recall -> {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Function to list all registered routes
