@@ -45,8 +45,9 @@ def ensure_timestamp_column():
 # Middleware to check API Key
 def verify_api_key():
     key = request.headers.get("X-API-KEY")
-    print(f"DEBUG: Received Headers -> {dict(request.headers)}")  # Logs all headers
+    print(f"DEBUG: Received Headers -> {dict(request.headers)}")  # Log all headers
     if key != API_KEY:
+        print("DEBUG: Unauthorized request - API Key mismatch")
         return jsonify({"error": "Unauthorized access"}), 403
 
 # Set default timezone to Central Time
@@ -157,25 +158,13 @@ def recall():
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Endpoint to keep database awake
-@app.route("/ping-db", methods=["GET"])
-def ping_db():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
+# Function to list all registered routes
+def list_routes():
+    for rule in app.url_map.iter_rules():
+        print(f"DEBUG: Registered route -> {rule}")
 
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "Database is awake"}), 200
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Initialize database (ensure timestamp column exists before running the app)
+# Initialize database and check routes before running the app
 if __name__ == "__main__":
     ensure_timestamp_column()
+    list_routes()
     app.run(host="0.0.0.0", port=8080)
