@@ -112,7 +112,12 @@ def recall():
         return error  # Deny request if API key is wrong
 
     topic = request.args.get("topic")
-    print(f"DEBUG: Looking for memory with topic '{topic}'")
+    print(f"DEBUG: Received recall request - topic='{topic}'")
+
+    # Check if topic is missing
+    if not topic:
+        print("ERROR: Missing 'topic' parameter in /recall")
+        return jsonify({"error": "Missing 'topic' query parameter"}), 400
 
     try:
         conn = get_db_connection()
@@ -122,7 +127,7 @@ def recall():
         cursor.close()
         conn.close()
 
-        print(f"DEBUG: Retrieved memory -> {result}")
+        print(f"DEBUG: Retrieved memory from DB -> {result}")
 
         if result:
             details, timestamp_utc = result
