@@ -45,6 +45,7 @@ def ensure_timestamp_column():
 # Middleware to check API Key
 def verify_api_key():
     key = request.headers.get("X-API-KEY")
+    print(f"DEBUG: Received Headers -> {dict(request.headers)}")  # Logs all headers
     if key != API_KEY:
         return jsonify({"error": "Unauthorized access"}), 403
 
