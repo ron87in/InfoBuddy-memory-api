@@ -9,6 +9,10 @@ app = Flask(__name__)
 
 # Retrieve API Key from environment variable
 API_KEY = os.getenv("API_KEY")
+if API_KEY:
+    print("DEBUG: API_KEY found.")
+else:
+    print("DEBUG: API_KEY not found!")
 
 # Database connection function
 def get_db_connection():
