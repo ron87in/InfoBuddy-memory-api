@@ -33,24 +33,62 @@ def remember():
     topic = data.get("topic")
     details = data.get("details")
     timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).isoformat()
-    timestamp_central = timestamp_utc.astimezone(CENTRAL_TZ).isoformat()
 
-    print(f"DEBUG: Saving memory - topic={topic}, details={details}, timestamp={timestamp_utc}")  # Debug log
+    print(f"DEBUG: Saving memory - topic={topic}, details={details}, timestamp={timestamp_utc}")
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+
+        # Ensure the timestamp column exists
         cursor.execute("ALTER TABLE memory ADD COLUMN IF NOT EXISTS timestamp TIMESTAMP DEFAULT NOW();")
+
+        # Force-insert a timestamp even if updating
         cursor.execute(
-            "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, %s) "
-            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = NOW();",
+            """
+            INSERT INTO memory (topic, details, timestamp) 
+            VALUES (%s, %s, %s) 
+            ON CONFLICT (topic) 
+            DO UPDATE SET details = EXCLUDED.details, timestamp = NOW();
+            """,
             (topic, details, timestamp_utc)
         )
+
         conn.commit()
         cursor.close()
         conn.close()
+
         print(f"DEBUG: Memory successfully saved - {topic}, {timestamp_utc}")
         return jsonify({"status": "Memory saved", "timestamp": timestamp_utc}), 200
+    except Exception as e:
+        print(f"ERROR: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Debugging API to check database schema and latest entries
+@app.route("/debug-db", methods=["GET"])
+def debug_db():
+    error = verify_api_key()
+    if error: return error  # Deny request if API key is wrong
+
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Check if timestamp column exists
+        cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'memory';")
+        columns = cursor.fetchall()
+
+        # Check the latest memories
+        cursor.execute("SELECT * FROM memory ORDER BY timestamp DESC LIMIT 5;")
+        recent_memories = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "columns": columns,
+            "recent_memories": recent_memories
+        }), 200
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -88,35 +126,6 @@ def recall():
             return jsonify({"memory": formatted_memory}), 200
         else:
             return jsonify({"memory": "No memory found"}), 200
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Debugging API to check database schema and latest entries
-@app.route("/debug-db", methods=["GET"])
-def debug_db():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Check if timestamp column exists
-        cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'memory';")
-        columns = cursor.fetchall()
-
-        # Check the latest memories
-        cursor.execute("SELECT * FROM memory ORDER BY timestamp DESC LIMIT 5;")
-        recent_memories = cursor.fetchall()
-
-        cursor.close()
-        conn.close()
-
-        return jsonify({
-            "columns": columns,
-            "recent_memories": recent_memories
-        }), 200
     except Exception as e:
         print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
