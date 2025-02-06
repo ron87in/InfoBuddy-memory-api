@@ -45,10 +45,21 @@ def ensure_timestamp_column():
 # Middleware to check API Key
 def verify_api_key():
     key = request.headers.get("X-API-KEY")
-    print(f"DEBUG: Received Headers -> {dict(request.headers)}")  # Log all headers
+    print(f"DEBUG: Checking API Key. Received -> {key}")
+
     if key != API_KEY:
-        print("DEBUG: Unauthorized request - API Key mismatch")
+        print("DEBUG: Unauthorized access detected.")
         return jsonify({"error": "Unauthorized access"}), 403
+
+# Log every incoming request
+@app.before_request
+def log_request_info():
+    print(f"DEBUG: Received {request.method} request to {request.path}")
+    if request.args:
+        print(f"DEBUG: Query Params -> {request.args}")
+    if request.json:
+        print(f"DEBUG: JSON Payload -> {request.json}")
+    print(f"DEBUG: Headers -> {dict(request.headers)}")
 
 # Set default timezone to Central Time
 CENTRAL_TZ = pytz.timezone("America/Chicago")
@@ -89,45 +100,20 @@ def remember():
         return jsonify({"status": "Memory saved", "timestamp": timestamp_utc.isoformat()}), 200
 
     except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Debugging API to check database schema and latest entries
-@app.route("/debug-db", methods=["GET"])
-def debug_db():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Check if timestamp column exists
-        cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'memory';")
-        columns = cursor.fetchall()
-
-        # Check the latest memories
-        cursor.execute("SELECT * FROM memory ORDER BY timestamp DESC LIMIT 5;")
-        recent_memories = cursor.fetchall()
-
-        cursor.close()
-        conn.close()
-
-        return jsonify({
-            "columns": columns,
-            "recent_memories": recent_memories
-        }), 200
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
+        print(f"ERROR: Exception in /remember -> {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Endpoint to recall memory with timestamp
 @app.route("/recall", methods=["GET"])
 def recall():
     error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
+    if error:
+        print("DEBUG: API Key check failed in /recall")
+        return error  # Deny request if API key is wrong
 
     topic = request.args.get("topic")
+    print(f"DEBUG: Looking for memory with topic '{topic}'")
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -136,7 +122,7 @@ def recall():
         cursor.close()
         conn.close()
 
-        print(f"DEBUG: Retrieved memory from DB -> {result}")
+        print(f"DEBUG: Retrieved memory -> {result}")
 
         if result:
             details, timestamp_utc = result
@@ -151,11 +137,14 @@ def recall():
                 formatted_memory = f"{details} (Recorded {time_ago} at {memory_time_central.strftime('%Y-%m-%d %I:%M %p %Z')})"
             else:
                 formatted_memory = f"{details} (No timestamp available)"
+
+            print(f"DEBUG: Formatted memory response -> {formatted_memory}")
             return jsonify({"memory": formatted_memory}), 200
         else:
+            print("DEBUG: No memory found for topic")
             return jsonify({"memory": "No memory found"}), 200
     except Exception as e:
-        print(f"ERROR: {str(e)}")
+        print(f"ERROR: Exception in /recall -> {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # Function to list all registered routes
