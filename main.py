@@ -1,6 +1,9 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import os
+import datetime
+import pytz
+from dateutil import parser, relativedelta
 
 app = Flask(__name__)
 
@@ -17,7 +20,10 @@ def verify_api_key():
     if key != API_KEY:
         return jsonify({"error": "Unauthorized access"}), 403
 
-# Endpoint to save memory
+# Set default timezone to Central Time
+CENTRAL_TZ = pytz.timezone("America/Chicago")
+
+# Endpoint to save memory with timestamp
 @app.route("/remember", methods=["POST"])
 def remember():
     error = verify_api_key()
@@ -26,19 +32,25 @@ def remember():
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
+    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    timestamp_central = timestamp_utc.astimezone(CENTRAL_TZ).isoformat()
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details", (topic, details))
+        cursor.execute(
+            "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, %s) "
+            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp",
+            (topic, details, timestamp_utc.isoformat())
+        )
         conn.commit()
         cursor.close()
         conn.close()
-        return jsonify({"status": "Memory saved"}), 200
+        return jsonify({"status": "Memory saved", "timestamp_central": timestamp_central}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# Endpoint to recall memory
+# Endpoint to recall memory with conversational timestamp
 @app.route("/recall", methods=["GET"])
 def recall():
     error = verify_api_key()
@@ -48,11 +60,22 @@ def recall():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT details FROM memory WHERE topic = %s", (topic,))
+        cursor.execute("SELECT details, timestamp FROM memory WHERE topic = %s", (topic,))
         result = cursor.fetchone()
         cursor.close()
         conn.close()
-        return jsonify({"memory": result[0] if result else "No memory found"}), 200
+
+        if result:
+            details, timestamp_utc = result
+            memory_time_utc = parser.parse(timestamp_utc).replace(tzinfo=pytz.utc)
+            memory_time_central = memory_time_utc.astimezone(CENTRAL_TZ)
+            current_time_central = datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(CENTRAL_TZ)
+            time_difference = relativedelta.relativedelta(current_time_central, memory_time_central)
+            time_ago = f"{time_difference.years} years, {time_difference.months} months, and {time_difference.days} days ago"
+            formatted_memory = f"{details} (Recorded {time_ago} at {memory_time_central.strftime('%Y-%m-%d %I:%M %p %Z')})"
+            return jsonify({"memory": formatted_memory}), 200
+        else:
+            return jsonify({"memory": "No memory found"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
