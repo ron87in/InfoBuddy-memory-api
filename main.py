@@ -22,7 +22,6 @@ def get_db_connection():
 def verify_api_key():
     key = request.headers.get("X-API-KEY")
     print(f"DEBUG: Checking API Key. Received -> {key}")
-
     if key != API_KEY:
         print("DEBUG: Unauthorized access detected.")
         return jsonify({"error": "Unauthorized access"}), 403
@@ -49,13 +48,12 @@ def remember():
     print(f"DEBUG: Received Headers -> {dict(request.headers)}")
     print(f"DEBUG: Content-Type Received -> {request.headers.get('Content-Type')}")
 
-    if not request.is_json:
-        return jsonify({
-            "error": "Request must be JSON",
-            "received_content_type": request.headers.get("Content-Type")
-        }), 415
+    try:
+        data = request.get_json(force=True)  # Force JSON parsing even if Content-Type is wrong
+    except Exception as e:
+        print(f"ERROR: Failed to parse JSON - {str(e)}")
+        return jsonify({"error": "Invalid JSON format"}), 400
 
-    data = request.json
     topic = data.get("topic")
     details = data.get("details")
     timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
