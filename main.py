@@ -1,84 +1,87 @@
+import os
+import psycopg2
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
-import psycopg2
-import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-# Swagger configuration
-app.config['SWAGGER'] = {
-    'title': "InfoBuddy Memory API",
-    'uiversion': 3
-}
-swagger = Swagger(app)
+Swagger(app)
 
 # Database connection setup
 DATABASE_URL = os.getenv("DATABASE_URL")
+API_KEY = os.getenv("API_KEY")
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable not set.")
-
-conn = psycopg2.connect(DATABASE_URL, sslmode='require')
+if not DATABASE_URL or not API_KEY:
+    raise ValueError("Missing required environment variables: DATABASE_URL or API_KEY")
 
 def get_db_connection():
-    try:
-        return psycopg2.connect(DATABASE_URL, sslmode='require')
-    except Exception as e:
-        print(f"Database connection error: {str(e)}")
-        return None
+    return psycopg2.connect(DATABASE_URL, sslmode='require')
 
-@app.route('/ping-db', methods=['GET'])
+@app.route("/ping-db", methods=["HEAD"])
 def ping_db():
-    """
-    Checks database connection status.
+    """Check database connectivity
     ---
     responses:
       200:
-        description: Database connection is active.
+        description: Database is reachable
+      500:
+        description: Database connection failed
     """
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        cur.close()
-        return jsonify({"status": "Database connection active"}), 200
+        conn = get_db_connection()
+        conn.close()
+        return "", 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return str(e), 500
 
-@app.route('/remember', methods=['POST'])
+@app.route("/remember", methods=["POST"])
 def remember():
-    """
-    Stores a memory with a topic and details.
+    """Store a memory in the database
     ---
     parameters:
-      - name: topic
-        in: formData
-        type: string
+      - name: X-API-KEY
+        in: header
         required: true
-        description: The topic of the memory.
-      - name: details
-        in: formData
         type: string
+      - name: body
+        in: body
         required: true
-        description: The details of the memory.
+        schema:
+          type: object
+          properties:
+            topic:
+              type: string
+            details:
+              type: string
     responses:
       200:
-        description: Memory stored successfully.
+        description: Memory stored successfully
       400:
-        description: Missing parameters.
+        description: Missing parameters
+      401:
+        description: Unauthorized
+      500:
+        description: Internal server error
     """
+    if request.headers.get("X-API-KEY") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
 
     if not topic or not details:
-        return jsonify({"error": "Missing topic or details"}), 400
+        return jsonify({"error": "Missing 'topic' or 'details'"}), 400
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, NOW())", (topic, details))
+        cur.execute("INSERT INTO memories (topic, details) VALUES (%s, %s)", (topic, details))
         conn.commit()
         cur.close()
         conn.close()
@@ -86,48 +89,52 @@ def remember():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/recall', methods=['GET'])
+@app.route("/recall", methods=["GET"])
 def recall():
-    """
-    Retrieves a memory by topic.
+    """Retrieve a memory from the database by topic
     ---
     parameters:
+      - name: X-API-KEY
+        in: header
+        required: true
+        type: string
       - name: topic
         in: query
-        type: string
         required: true
-        description: The topic of the memory to recall.
+        type: string
     responses:
       200:
-        description: Memory retrieved successfully.
+        description: Retrieved memory successfully
       400:
-        description: Missing topic parameter.
+        description: Missing topic parameter
+      401:
+        description: Unauthorized
       404:
-        description: Memory not found.
+        description: No memory found
+      500:
+        description: Internal server error
     """
-    topic = request.args.get("topic")
+    if request.headers.get("X-API-KEY") != API_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
 
+    topic = request.args.get("topic")
     if not topic:
-        return jsonify({"error": "Missing topic parameter"}), 400
+        return jsonify({"error": "Missing 'topic' parameter"}), 400
 
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute("SELECT details, timestamp FROM memory WHERE topic = %s", (topic,))
+        cur.execute("SELECT details FROM memories WHERE topic = %s ORDER BY created_at DESC LIMIT 1", (topic,))
         memory = cur.fetchone()
         cur.close()
         conn.close()
 
         if memory:
-            return jsonify({"topic": topic, "details": memory[0], "timestamp": memory[1]}), 200
+            return jsonify({"topic": topic, "details": memory[0]}), 200
         else:
-            return jsonify({"error": "Memory not found"}), 404
+            return jsonify({"error": "No memory found for this topic"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/')
-def home():
-    return "Welcome to the InfoBuddy Memory API! Navigate to /apidocs/ for API documentation."
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8080)
