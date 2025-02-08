@@ -1,106 +1,115 @@
 from flask import Flask, request, jsonify
-import psycopg2
+from flasgger import Swagger
+from flask_cors import CORS
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
+import psycopg2
 
 app = Flask(__name__)
+CORS(app)  # Enables CORS (in case Swagger isn't loading due to CORS)
+swagger = Swagger(app)  # Initializes Swagger UI
 
-# Database connection setup
+# ✅ Environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
+API_KEY = os.getenv("API_KEY")
 
+# ✅ Database Connection
 def get_db_connection():
-    try:
-        conn = psycopg2.connect(DATABASE_URL)
-        return conn
-    except Exception as e:
-        print(f"Database connection error: {e}")
-        return None
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
+# ✅ Security - API Key Check
+def verify_api_key():
+    key = request.headers.get("X-API-KEY")
+    if key != API_KEY:
+        return jsonify({"error": "Invalid API key"}), 403
+
+# ✅ Ping Database Route
+@app.route("/ping-db", methods=["HEAD"])
+def ping_db():
+    """Check database connection
+    ---
+    responses:
+      200:
+        description: Database is online
+    """
+    try:
+        conn = get_db_connection()
+        conn.close()
+        return "", 200
+    except:
+        return "", 500
+
+# ✅ Store Memory Route
 @app.route("/remember", methods=["POST"])
 def remember():
+    """Store a memory
+    ---
+    parameters:
+      - name: topic
+        in: formData
+        type: string
+        required: true
+      - name: details
+        in: formData
+        type: string
+        required: true
+    responses:
+      200:
+        description: Memory stored successfully
+    """
+    auth_check = verify_api_key()
+    if auth_check:
+        return auth_check
+
     data = request.json
     topic = data.get("topic")
     details = data.get("details")
 
-    if not topic or not details:
-        return jsonify({"error": "Missing topic or details"}), 400
-
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"error": "Failed to connect to database"}), 500
-
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, NOW())",
-                (topic, details),
-            )
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, NOW())", (topic, details))
         conn.commit()
-        return jsonify({"message": "Memory saved successfully"}), 201
-    except Exception as e:
-        print(f"Database insert error: {e}")
-        return jsonify({"error": "Failed to save memory"}), 500
-    finally:
+        cur.close()
         conn.close()
+        return jsonify({"message": "Memory stored successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
+# ✅ Retrieve Memory Route
 @app.route("/recall", methods=["GET"])
 def recall():
+    """Retrieve a memory
+    ---
+    parameters:
+      - name: topic
+        in: query
+        type: string
+        required: true
+    responses:
+      200:
+        description: Memory retrieved
+    """
+    auth_check = verify_api_key()
+    if auth_check:
+        return auth_check
+
     topic = request.args.get("topic")
 
-    if not topic:
-        return jsonify({"error": "Missing topic parameter"}), 400
-
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"error": "Failed to connect to database"}), 500
-
     try:
-        with conn.cursor() as cur:
-            print(f"Querying for topic: {topic}")  # Debug log
-            cur.execute("SELECT details, timestamp FROM memory WHERE topic = %s", (topic,))
-            result = cur.fetchone()
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT details FROM memory WHERE topic = %s ORDER BY timestamp DESC LIMIT 1", (topic,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
 
-        if result:
-            details, timestamp = result
-            return jsonify({"topic": topic, "details": details, "timestamp": timestamp})
+        if row:
+            return jsonify({"memory": row[0]}), 200
         else:
             return jsonify({"error": "Memory not found"}), 404
     except Exception as e:
-        print(f"Database query error: {e}")
-        return jsonify({"error": "Failed to retrieve memory"}), 500
-    finally:
-        conn.close()
+        return jsonify({"error": str(e)}), 500
 
-# Debug route to list all stored memories
-@app.route("/debug-db", methods=["GET"])
-def debug_db():
-    conn = get_db_connection()
-    if not conn:
-        return jsonify({"error": "Failed to connect to database"}), 500
-
-    try:
-        with conn.cursor() as cur:
-            cur.execute("SELECT topic, details, timestamp FROM memory LIMIT 10;")
-            results = cur.fetchall()
-
-        return jsonify({"memories": [{"topic": row[0], "details": row[1], "timestamp": row[2]} for row in results]})
-    except Exception as e:
-        print(f"Database debug error: {e}")
-        return jsonify({"error": "Failed to retrieve database contents"}), 500
-    finally:
-        conn.close()
-
-@app.route("/ping-db", methods=["GET"])
-def ping_db():
-    """Check database connectivity"""
-    conn = get_db_connection()
-    if conn:
-        conn.close()
-        return jsonify({"message": "Database is reachable"}), 200
-    else:
-        return jsonify({"error": "Database connection failed"}), 500
-
+# ✅ Run the App
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
