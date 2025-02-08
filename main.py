@@ -1,164 +1,93 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import os
-import datetime
-import pytz
-from dateutil import parser, relativedelta
 
 app = Flask(__name__)
 
-# Retrieve API Key from environment variable
+# Load environment variables
+DATABASE_URL = os.getenv("DATABASE_URL")
 API_KEY = os.getenv("API_KEY")
-if API_KEY:
-    print("DEBUG: API_KEY found.")
-else:
-    print("DEBUG: API_KEY not found!")
 
-# Database connection function
+# Ensure DB connection
 def get_db_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+    conn = psycopg2.connect(DATABASE_URL)
+    return conn
 
-# Middleware to check API Key
-def verify_api_key():
-    key = request.headers.get("X-API-KEY")
-    if key != API_KEY:
-        return jsonify({"error": "Unauthorized access"}), 403
+# Ensure table exists
+def init_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS memory (
+            topic TEXT PRIMARY KEY,
+            details TEXT
+        );
+    """)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-# Set default timezone to Central Time
-CENTRAL_TZ = pytz.timezone("America/Chicago")
+init_db()  # Initialize DB on startup
 
-# Endpoint to save memory with timestamp
+# Secure function to check API key
+def check_api_key(req):
+    provided_key = req.headers.get("X-API-KEY")
+    return provided_key == API_KEY
+
+# Route: Store memory
 @app.route("/remember", methods=["POST"])
 def remember():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
-    topic = data.get("topic")
-    details = data.get("details")
-    timestamp_utc = datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
+    topic = data.get("topic", "").strip().lower()
+    details = data.get("details", "").strip()
 
-    print(f"DEBUG: Attempting to store memory - topic={topic}, details={details}, timestamp={timestamp_utc}")
+    if not topic or not details:
+        return jsonify({"error": "Invalid data"}), 400
 
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO memory (topic, details) VALUES (%s, %s) ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details;", (topic, details))
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-        # Ensure the timestamp column exists
-        cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'memory' AND column_name = 'timestamp';")
-        column_exists = cursor.fetchone()
+    return jsonify({"message": f"Memory stored: '{topic}' -> '{details}'"}), 200
 
-        if not column_exists:
-            print("DEBUG: Adding missing timestamp column...")
-            cursor.execute("ALTER TABLE memory ADD COLUMN timestamp TIMESTAMP DEFAULT NOW();")
-            conn.commit()
-
-        # Insert the memory with timestamp
-        cursor.execute(
-            """
-            INSERT INTO memory (topic, details, timestamp) 
-            VALUES (%s, %s, %s) 
-            ON CONFLICT (topic) 
-            DO UPDATE SET details = EXCLUDED.details, timestamp = NOW();
-            """,
-            (topic, details, timestamp_utc)
-        )
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        print(f"DEBUG: Successfully stored memory - topic={topic}, timestamp={timestamp_utc}")
-        return jsonify({"status": "Memory saved", "timestamp": timestamp_utc.isoformat()}), 200
-
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Debugging API to check database schema and latest entries
-@app.route("/debug-db", methods=["GET"])
-def debug_db():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
-
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        # Check if timestamp column exists
-        cursor.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'memory';")
-        columns = cursor.fetchall()
-
-        # Check the latest memories
-        cursor.execute("SELECT * FROM memory ORDER BY timestamp DESC LIMIT 5;")
-        recent_memories = cursor.fetchall()
-
-        cursor.close()
-        conn.close()
-
-        return jsonify({
-            "columns": columns,
-            "recent_memories": recent_memories
-        }), 200
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-# Endpoint to recall memory with timestamp
+# Route: Retrieve memory
 @app.route("/recall", methods=["GET"])
 def recall():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
 
-    topic = request.args.get("topic")
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT details, timestamp FROM memory WHERE topic = %s", (topic,))
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
+    topic = request.args.get("topic", "").strip().lower()
+    if not topic:
+        return jsonify({"error": "No topic provided"}), 400
 
-        print(f"DEBUG: Retrieved memory from DB -> {result}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT details FROM memory WHERE topic = %s;", (topic,))
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
 
-        if result:
-            details, timestamp_utc = result
-            if timestamp_utc:
-                memory_time_utc = parser.parse(str(timestamp_utc)).replace(tzinfo=pytz.utc)
-                memory_time_central = memory_time_utc.astimezone(CENTRAL_TZ)
-                time_difference = relativedelta.relativedelta(
-                    datetime.datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(CENTRAL_TZ), 
-                    memory_time_central
-                )
-                time_ago = f"{time_difference.years} years, {time_difference.months} months, and {time_difference.days} days ago"
-                formatted_memory = f"{details} (Recorded {time_ago} at {memory_time_central.strftime('%Y-%m-%d %I:%M %p %Z')})"
-            else:
-                formatted_memory = f"{details} (No timestamp available)"
-            return jsonify({"memory": formatted_memory}), 200
-        else:
-            return jsonify({"memory": "No memory found"}), 200
-    except Exception as e:
-        print(f"ERROR: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"memory": result[0] if result else "No memory found"}), 200
 
-# Endpoint to keep database awake
+# Route: Keep database alive (for UptimeRobot)
 @app.route("/ping-db", methods=["GET"])
 def ping_db():
-    error = verify_api_key()
-    if error: return error  # Deny request if API key is wrong
-
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        conn.commit()
+        cursor.execute("SELECT 1;")
         cursor.close()
         conn.close()
-        return jsonify({"status": "Database is awake"}), 200
+        return jsonify({"status": "Database is active"}), 200
     except Exception as e:
-        print(f"ERROR: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Initialize database (if needed)
+# Start Flask app
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    app.run(host="0.0.0.0", port=10000)

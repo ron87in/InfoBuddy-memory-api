@@ -1,7 +1,3 @@
 flask
-requests
-psycopg2
 gunicorn
 psycopg2-binary
-python-dateutil
-pytz
