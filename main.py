@@ -1,9 +1,9 @@
-    import os
-    import psycopg2
-    from flask import Flask, request, jsonify
-    from flask_cors import CORS
-    from flasgger import Swagger
-    from datetime import datetime
+import os
+import psycopg2
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from flasgger import Swagger
+from datetime import datetime
 
     app = Flask(__name__)
     CORS(app)
