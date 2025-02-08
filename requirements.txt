@@ -5,6 +5,3 @@ gunicorn
 psycopg2-binary
 python-dateutil
 pytz
-flasgger
-python-dotenv
-flask_cors
