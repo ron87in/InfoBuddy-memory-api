@@ -1,106 +1,70 @@
 import os
-import logging
+import psycopg2
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
-import psycopg2
 
 # Load environment variables
 load_dotenv()
 
-# Securely retrieve API key
-API_KEY = os.getenv("API_KEY")
-
-if not API_KEY:
-    raise ValueError("API_KEY environment variable is missing!")
-
-# Initialize Flask
 app = Flask(__name__)
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+# Retrieve API key
+API_KEY = os.getenv("API_KEY")
+DB_URL = os.getenv("DATABASE_URL")
 
-# Database connection settings
-DATABASE_URL = os.getenv("DATABASE_URL")
+if not API_KEY:
+    print("ERROR: API_KEY is not set!")
 
-# Ensure database URL is set
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is missing!")
+if not DB_URL:
+    print("ERROR: DATABASE_URL is not set!")
 
 def get_db_connection():
-    """Establish a connection to the database."""
-    return psycopg2.connect(DATABASE_URL)
-
-@app.route("/")
-def home():
-    return jsonify({"message": "InfoBuddy+ API is running!"})
-
-@app.route("/ping-db", methods=["HEAD", "GET"])
-def ping_db():
-    """Check database connection."""
     try:
-        conn = get_db_connection()
-        conn.close()
-        return jsonify({"status": "Database connection successful"}), 200
+        conn = psycopg2.connect(DB_URL)
+        print("Database connection successful.")
+        return conn
     except Exception as e:
-        logging.error(f"Database connection error: {e}")
-        return jsonify({"error": "Database connection failed"}), 500
-
-@app.route("/remember", methods=["POST"])
-def remember():
-    """Store a memory in the database."""
-    if request.headers.get("X-API-KEY") != API_KEY:
-        logging.warning("Unauthorized access attempt.")
-        return jsonify({"error": "Unauthorized - Invalid API Key"}), 403
-
-    data = request.get_json()
-    if not data or "topic" not in data or "details" not in data:
-        return jsonify({"error": "Invalid data format"}), 400
-
-    topic = data["topic"]
-    details = data["details"]
-
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO memories (topic, details, timestamp) VALUES (%s, %s, NOW())",
-            (topic, details),
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-        logging.info(f"Stored memory: {topic}")
-        return jsonify({"message": "Memory stored successfully"}), 200
-    except Exception as e:
-        logging.error(f"Database insertion error: {e}")
-        return jsonify({"error": "Failed to store memory"}), 500
+        print(f"Database connection error: {e}")
+        return None
 
 @app.route("/recall", methods=["GET"])
 def recall():
-    """Retrieve a memory from the database."""
-    if request.headers.get("X-API-KEY") != API_KEY:
-        logging.warning("Unauthorized access attempt.")
-        return jsonify({"error": "Unauthorized - Invalid API Key"}), 403
-
-    topic = request.args.get("topic")
-    if not topic:
-        return jsonify({"error": "Missing topic parameter"}), 400
-
     try:
+        user_api_key = request.headers.get("X-API-KEY")
+
+        if not user_api_key:
+            print("Unauthorized access: No API key provided.")
+            return jsonify({"error": "Unauthorized - No API Key"}), 403
+
+        if user_api_key != API_KEY:
+            print("Unauthorized access attempt.")
+            return jsonify({"error": "Unauthorized - Invalid API Key"}), 403
+
+        topic = request.args.get("topic")
+        if not topic:
+            print("Error: No topic provided in request.")
+            return jsonify({"error": "Topic parameter is required"}), 400
+
         conn = get_db_connection()
+        if not conn:
+            print("Error: Database connection failed.")
+            return jsonify({"error": "Database connection failed"}), 500
+
         cur = conn.cursor()
-        cur.execute("SELECT details, timestamp FROM memories WHERE topic = %s", (topic,))
-        memory = cur.fetchone()
+        cur.execute("SELECT details FROM memories WHERE topic = %s", (topic,))
+        result = cur.fetchone()
         cur.close()
         conn.close()
 
-        if memory:
-            details, timestamp = memory
-            return jsonify({"topic": topic, "details": details, "timestamp": timestamp}), 200
-        else:
+        if not result:
+            print(f"Memory not found for topic: {topic}")
             return jsonify({"error": "Memory not found"}), 404
+
+        print(f"Successfully retrieved memory for topic: {topic}")
+        return jsonify({"topic": topic, "details": result[0]}), 200
+
     except Exception as e:
-        logging.error(f"Database query error: {e}")
+        print(f"Error in /recall: {e}")
         return jsonify({"error": "Failed to retrieve memory"}), 500
 
 if __name__ == "__main__":
