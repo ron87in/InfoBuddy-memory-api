@@ -1,158 +1,90 @@
 from flask import Flask, request, jsonify
-import psycopg2
 import os
-import datetime
-import pytz
-import json
-from dateutil import parser
-from flasgger import Swagger
+import psycopg2
+from datetime import datetime
 
 app = Flask(__name__)
-swagger = Swagger(app)
 
-# Retrieve API Key from environment variable
+# Load API key from environment variables
 API_KEY = os.getenv("API_KEY")
 
-# Database connection function
-def get_db_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
+if API_KEY:
+    print("DEBUG: API Key Loaded ✅")  # No key output for security
+else:
+    print("ERROR: API Key is NOT being loaded! ❌")
 
-# Middleware to check API Key
-def verify_api_key():
-    key = request.headers.get("X-API-KEY") or request.headers.get("Authorization")
+# Database connection
+DB_URL = os.getenv("DATABASE_URL")
+conn = psycopg2.connect(DB_URL)
+cur = conn.cursor()
 
-    # If Authorization header is used, extract Bearer token
-    if key and key.startswith("Bearer "):
-        key = key.split(" ")[1]
+# 🔹 Middleware to validate API Key for all requests
+@app.before_request
+def validate_api_key():
+    api_key = request.headers.get("X-Api-Key") or request.headers.get("x-api-key")
 
-    if key != API_KEY:
-        return jsonify({"error": "Unauthorized access"}), 403
+    if not api_key:
+        print("DEBUG: No API Key provided! ❌")
+        return jsonify({"error": "Unauthorized - Missing API Key"}), 403
 
-# Endpoint to save memory with timestamp
+    if api_key != API_KEY:
+        print("DEBUG: Unauthorized request - Invalid API Key ❌")
+        return jsonify({"error": "Unauthorized - Invalid API Key"}), 403
+
+# 🔹 Store memory in the database
 @app.route("/remember", methods=["POST"])
 def remember():
-    """
-    Save a memory
-    ---
-    tags:
-      - Memory
-    parameters:
-      - name: X-API-KEY
-        in: header
-        type: string
-        required: true
-        description: API Key for authentication
-      - name: body
-        in: body
-        required: true
-        schema:
-          type: object
-          required:
-            - topic
-            - details
-          properties:
-            topic:
-              type: string
-              example: "test_memory"
-            details:
-              type: string
-              example: "This is a test entry"
-    responses:
-      200:
-        description: Memory saved
-    """
-    error = verify_api_key()
-    if error:
-        return error
-
-    data = request.json
-    topic = data.get("topic")
-    details = data.get("details")
-
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, NOW()) "
-            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = NOW();",
-            (topic, details)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "Memory saved"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        data = request.get_json()
+        topic = data.get("topic")
+        details = data.get("details")
+        timestamp = datetime.utcnow()
 
-# Endpoint to recall memory with timestamp
+        cur.execute(
+            "INSERT INTO memories (topic, details, timestamp) VALUES (%s, %s, %s) RETURNING id",
+            (topic, details, timestamp)
+        )
+        memory_id = cur.fetchone()[0]
+        conn.commit()
+
+        print(f"DEBUG: Memory stored -> Topic: {topic}, ID: {memory_id} ✅")
+        return jsonify({"message": "Memory stored successfully", "id": memory_id, "timestamp": timestamp.isoformat()}), 200
+    except Exception as e:
+        print(f"ERROR: Failed to store memory -> {str(e)} ❌")
+        return jsonify({"error": "Internal Server Error"}), 500
+
+# 🔹 Retrieve memory from the database
 @app.route("/recall", methods=["GET"])
 def recall():
-    """
-    Retrieve a memory
-    ---
-    tags:
-      - Memory
-    parameters:
-      - name: X-API-KEY
-        in: header
-        type: string
-        required: true
-        description: API Key for authentication
-      - name: topic
-        in: query
-        type: string
-        required: true
-        description: Topic of the memory to recall
-    responses:
-      200:
-        description: Memory retrieved
-        schema:
-          type: object
-          properties:
-            memory:
-              type: string
-              example: "This is a test entry"
-            timestamp:
-              type: string
-              example: "2025-02-06T12:34:56Z"
-      403:
-        description: Unauthorized access (API key missing or invalid)
-    """
-    error = verify_api_key()
-    if error:
-        return error
-
-    topic = request.args.get("topic")
-    if not topic:
-        return jsonify({"error": "Missing 'topic' query parameter"}), 400
-
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT details, timestamp FROM memory WHERE topic = %s", (topic,))
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        topic = request.args.get("topic")
 
-        if result:
-            details, timestamp = result
-            return jsonify({"memory": details, "timestamp": timestamp.isoformat()}), 200
+        if not topic:
+            print("DEBUG: Missing 'topic' parameter in request. ❌")
+            return jsonify({"error": "Bad Request - Missing topic parameter"}), 400
+
+        cur.execute("SELECT details, timestamp FROM memories WHERE topic = %s", (topic,))
+        memory = cur.fetchone()
+
+        if memory:
+            print(f"DEBUG: Memory retrieved -> Topic: {topic} ✅")
+            return jsonify({"topic": topic, "details": memory[0], "timestamp": memory[1].isoformat()}), 200
         else:
-            return jsonify({"memory": "No memory found"}), 200
+            print(f"DEBUG: No memory found for topic -> {topic} ❌")
+            return jsonify({"error": "Memory not found"}), 404
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"ERROR: Failed to retrieve memory -> {str(e)} ❌")
+        return jsonify({"error": "Internal Server Error"}), 500
 
-# Swagger UI Route
-@app.route("/apidocs/")
-def apidocs():
-    """
-    API Documentation
-    ---
-    responses:
-      200:
-        description: Swagger UI for API documentation
-    """
-    return jsonify({"message": "Swagger UI available at /apidocs/"})
+# 🔹 Keep database connection alive
+@app.route("/ping-db", methods=["HEAD", "GET"])
+def ping_db():
+    try:
+        cur.execute("SELECT 1")
+        return "Database is alive", 200
+    except Exception as e:
+        print(f"ERROR: Database connection failed -> {str(e)} ❌")
+        return jsonify({"error": "Database Unreachable"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
