@@ -23,6 +23,33 @@ if DATABASE_URL:
 else:
     logging.info("❌ ERROR: Database URL not found. Check Render settings.")
 
+
+# --------------------------------------------
+# 🚨 Fix: Force logging to work properly
+# --------------------------------------------
+logging.basicConfig(
+    level=logging.DEBUG,  # Show all log levels (DEBUG, INFO, WARNING, ERROR)
+    format="%(asctime)s [%(levelname)s] - %(message)s",
+    handlers=[
+        logging.StreamHandler()  # Ensure logs show in Render
+    ]
+)
+
+logging.info("🚀 Logging system initialized.")
+
+
+# test log given to a url at https://infobuddy-memory-api.onrender.com/test-log
+
+@app.route("/test-log", methods=["GET"])
+def test_log():
+    """Test endpoint to confirm logs are working."""
+    logging.info("✅ Log test successful!")
+    return jsonify({"message": "Logging is working!"}), 200
+
+# this is where logging initialisation ends
+
+
+
 app = Flask(__name__)
 CORS(app)
 Swagger(app)
