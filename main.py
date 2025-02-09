@@ -68,7 +68,11 @@ def check_api_key(req):
 
 @app.route("/remember", methods=["POST"])
 def remember():
-    """Store or update a memory by topic."""
+    """
+    Store or update a memory by topic (case-sensitive storage).
+    Falls back to:
+      - ON CONFLICT for updating existing topic
+    """
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -85,11 +89,12 @@ def remember():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute(
-            """
+
+        # Insert or update the memory
+        cursor.execute("""
             INSERT INTO memory (topic, details, timestamp)
             VALUES (%s, %s, %s)
-            ON CONFLICT (topic) DO UPDATE 
+            ON CONFLICT (topic) DO UPDATE
             SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp;
             """,
             (topic, details, datetime.utcnow())
@@ -97,13 +102,18 @@ def remember():
         conn.commit()
         cursor.close()
         conn.close()
+
         return jsonify({"message": f"Memory stored: '{topic}'"}), 200
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/recall", methods=["GET"])
 def recall():
-    """Retrieve memory details by topic (exact match)."""
+    """
+    Retrieve memory details by topic (exact match, ignoring case).
+    Does NOT do fallback searching; if no match, returns 404.
+    """
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -117,7 +127,11 @@ def recall():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute("SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);", (topic,))
+        # Case-insensitive exact match
+        cursor.execute(
+            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
+            (topic,)
+        )
         result = cursor.fetchone()
         cursor.close()
         conn.close()
@@ -126,12 +140,16 @@ def recall():
             return jsonify({"memory": result[0], "timestamp": result[1]}), 200
         else:
             return jsonify({"memory": "No memory found"}), 404
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Tries to recall an exact match first; if none exists, performs a broad search in both topic & details."""
+    """
+    Tries exact match first (case-insensitive).
+    If none, does a broad substring search across topic & details.
+    """
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -140,22 +158,33 @@ def recall_or_search():
         return jsonify({"error": "No topic provided"}), 400
 
     try:
+        print(f"🔎 Incoming request to /recall-or-search?topic={topic}")
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
-
         cursor = conn.cursor()
 
-        # Try exact match first (case-insensitive)
-        cursor.execute("SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);", (topic,))
-        exact_match = cursor.fetchone()
-
-        # If no exact match, perform a broad search in both topic & details
+        # 1) Exact match (case-insensitive)
         cursor.execute(
-            "SELECT topic, details, timestamp FROM memory WHERE topic ILIKE %s OR details ILIKE %s ORDER BY timestamp DESC;",
+            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
+            (topic,)
+        )
+        exact_match = cursor.fetchone()
+        print(f"   • Exact match? {bool(exact_match)}")
+
+        # 2) Fallback: search in both topic & details
+        cursor.execute(
+            """
+            SELECT topic, details, timestamp
+            FROM memory
+            WHERE topic ILIKE %s
+               OR details ILIKE %s
+            ORDER BY timestamp DESC;
+            """,
             (f"%{topic}%", f"%{topic}%")
         )
         search_results = cursor.fetchall()
+        print(f"   • Found {len(search_results)} search results for '{topic}'.")
 
         cursor.close()
         conn.close()
@@ -169,14 +198,21 @@ def recall_or_search():
             }
 
         if search_results:
+            # Convert to JSON-friendly list
             response_data["related_memories"] = [
-                {"topic": row[0], "details": row[1], "timestamp": row[2]} for row in search_results
+                {
+                    "topic": row[0],
+                    "details": row[1],
+                    "timestamp": row[2]
+                }
+                for row in search_results
             ]
 
         if not response_data:
-            print(f"🛑 No memory found for '{topic}'. Returning 404.")
+            print(f"🛑 No memory found for '{topic}' in topic or details. Returning 404.")
             return jsonify({"memory": "No memory found"}), 404
 
+        # Return the combined data
         return jsonify(response_data), 200
 
     except Exception as e:
@@ -185,7 +221,10 @@ def recall_or_search():
 
 @app.route("/search", methods=["GET"])
 def search_memory():
-    """Search the memory database by substring in 'topic' OR 'details'."""
+    """
+    Search the memory database by substring in 'topic' OR 'details'.
+    (Case-insensitive, returns all matches.)
+    """
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -194,12 +233,12 @@ def search_memory():
         return jsonify({"error": "No search query provided"}), 400
 
     try:
+        print(f"🔎 Searching with query='{query}' in /search endpoint.")
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        # ILIKE is case-insensitive in Postgres. Searching in both topic and details.
         cursor.execute(
             """
             SELECT topic, details, timestamp
@@ -211,6 +250,8 @@ def search_memory():
             (f"%{query}%", f"%{query}%")
         )
         results = cursor.fetchall()
+        print(f"   • /search found {len(results)} results for '{query}'.")
+
         cursor.close()
         conn.close()
 
@@ -223,6 +264,23 @@ def search_memory():
             })
 
         return jsonify({"memories": memories}), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/ping-db", methods=["HEAD", "GET"])
+def ping_db():
+    """Ping the database to keep it alive."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "Database is active"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
