@@ -103,7 +103,7 @@ def remember():
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """First tries to recall an exact match; if none exists, performs a broad search and returns all relevant memories."""
+    """Retrieve an exact match or perform a case-insensitive search if no exact match exists."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -118,12 +118,15 @@ def recall_or_search():
 
         cursor = conn.cursor()
 
-        # Try exact match first
+        # Try an exact match (case insensitive)
         cursor.execute("SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);", (topic,))
         exact_match = cursor.fetchone()
 
-        # If no exact match, perform a broad search
-        cursor.execute("SELECT topic, details, timestamp FROM memory WHERE details ILIKE %s ORDER BY timestamp DESC;", (f"%{topic}%",))
+        # If no exact match, perform a broad search in both topic & details
+        cursor.execute(
+            "SELECT topic, details, timestamp FROM memory WHERE topic ILIKE %s OR details ILIKE %s ORDER BY timestamp DESC;",
+            (f"%{topic}%", f"%{topic}%")
+        )
         search_results = cursor.fetchall()
 
         cursor.close()
@@ -147,6 +150,44 @@ def recall_or_search():
 
         return jsonify(response_data), 200
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/list-memories", methods=["GET"])
+def list_memories():
+    """Retrieve a list of all stored memories."""
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT topic, details, timestamp FROM memory ORDER BY timestamp DESC;")
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        memories = [{"topic": row[0], "details": row[1], "timestamp": row[2]} for row in results]
+        return jsonify({"memories": memories}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/ping-db", methods=["HEAD", "GET"])
+def ping_db():
+    """Ping the database to keep it alive."""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        cursor.close()
+        conn.close()
+        return jsonify({"status": "Database is active"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
