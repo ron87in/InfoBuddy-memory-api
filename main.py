@@ -131,7 +131,7 @@ def recall():
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """First tries to recall an exact match; if none exists, performs a broad search and returns all relevant memories."""
+    """Tries to recall an exact match first; if none exists, performs a broad search in both topic & details."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -174,11 +174,13 @@ def recall_or_search():
             ]
 
         if not response_data:
+            print(f"🛑 No memory found for '{topic}'. Returning 404.")
             return jsonify({"memory": "No memory found"}), 404
 
         return jsonify(response_data), 200
 
     except Exception as e:
+        print(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/search", methods=["GET"])
@@ -220,28 +222,6 @@ def search_memory():
                 "timestamp": row[2]
             })
 
-        return jsonify({"memories": memories}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/list-memories", methods=["GET"])
-def list_memories():
-    """Retrieve a list of all stored memories."""
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        cursor.execute("SELECT topic, details, timestamp FROM memory ORDER BY timestamp DESC;")
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        memories = [{"topic": row[0], "details": row[1], "timestamp": row[2]} for row in results]
         return jsonify({"memories": memories}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
