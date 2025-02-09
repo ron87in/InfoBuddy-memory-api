@@ -7,25 +7,8 @@ from flasgger import Swagger
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-API_KEY = os.getenv("API_KEY")
-
-# Debugging confirmation
-if API_KEY:
-    logging.info("✅ API Key successfully loaded.")
-else:
-    logging.info("❌ ERROR: API Key not found. Make sure it's set in Render.")
-
-if DATABASE_URL:
-    logging.info("✅ Database URL successfully loaded.")
-else:
-    logging.info("❌ ERROR: Database URL not found. Check Render settings.")
-
-
 # --------------------------------------------
-# 🚨 Fix: Force logging to work properly
+# 🚨 Fix: Ensure Logging is Configured Correctly
 # --------------------------------------------
 logging.basicConfig(
     level=logging.DEBUG,  # Show all log levels (DEBUG, INFO, WARNING, ERROR)
@@ -37,29 +20,37 @@ logging.basicConfig(
 
 logging.info("🚀 Logging system initialized.")
 
-
-# test log given to a url at https://infobuddy-memory-api.onrender.com/test-log
-
-@app.route("/test-log", methods=["GET"])
-def test_log():
-    """Test endpoint to confirm logs are working."""
-    logging.info("✅ Log test successful!")
-    return jsonify({"message": "Logging is working!"}), 200
-
-# this is where logging initialisation ends
-
-
-
+# --------------------------------------------
+# Flask App Setup (Must be Declared Before Routes)
+# --------------------------------------------
 app = Flask(__name__)
 CORS(app)
 Swagger(app)
 
+# Load environment variables
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+API_KEY = os.getenv("API_KEY")
+
+if API_KEY:
+    logging.info("✅ API Key successfully loaded.")
+else:
+    logging.error("❌ ERROR: API Key not found. Make sure it's set in Render.")
+
+if DATABASE_URL:
+    logging.info("✅ Database URL successfully loaded.")
+else:
+    logging.error("❌ ERROR: Database URL not found. Check Render settings.")
+
+# --------------------------------------------
+# Database Connection Function
+# --------------------------------------------
 def get_db_connection():
     """Establish a connection to the PostgreSQL database."""
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
-        logging.info(f"❌ Database Connection Error: {str(e)}")
+        logging.error(f"❌ Database Connection Error: {str(e)}")
         return None
 
 # Ensure the memory table exists
@@ -79,28 +70,40 @@ def init_db():
         conn.close()
         logging.info("✅ Database initialized successfully.")
     else:
-        logging.info("❌ ERROR: Database initialization failed.")
+        logging.error("❌ ERROR: Database initialization failed.")
 
 init_db()
 
+# --------------------------------------------
+# API Key Check Function
+# --------------------------------------------
 def check_api_key(req):
     """Ensure the request has a valid API key."""
     provided_key = req.headers.get("X-API-KEY")
     if not API_KEY:
-        logging.info("❌ ERROR: API Key is missing from the environment.")
+        logging.error("❌ ERROR: API Key is missing from the environment.")
         return False
     if provided_key != API_KEY:
-        logging.info("🚨 API KEY MISMATCH - Unauthorized request")
+        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
         return False
     return True
 
+# --------------------------------------------
+# 🔥 Test Logging Endpoint
+# --------------------------------------------
+@app.route("/test-log", methods=["GET"])
+def test_log():
+    """Test endpoint to confirm logs are working."""
+    logging.info("✅ Log test successful!")
+    return jsonify({"message": "Logging is working!"}), 200
+
+# --------------------------------------------
+# Memory Storage & Retrieval Endpoints
+# --------------------------------------------
+
 @app.route("/remember", methods=["POST"])
 def remember():
-    """
-    Store or update a memory by topic (case-sensitive storage).
-    Falls back to:
-      - ON CONFLICT for updating existing topic
-    """
+    """Store or update a memory by topic."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -117,67 +120,26 @@ def remember():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-
-        # Insert or update the memory
         cursor.execute("""
             INSERT INTO memory (topic, details, timestamp)
             VALUES (%s, %s, %s)
             ON CONFLICT (topic) DO UPDATE
             SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp;
-            """,
-            (topic, details, datetime.utcnow())
-        )
+        """, (topic, details, datetime.utcnow()))
         conn.commit()
         cursor.close()
         conn.close()
 
+        logging.info(f"💾 Memory stored: '{topic}'")
         return jsonify({"message": f"Memory stored: '{topic}'"}), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/recall", methods=["GET"])
-def recall():
-    """
-    Retrieve memory details by topic (exact match, ignoring case).
-    Does NOT do fallback searching; if no match, returns 404.
-    """
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
-
-    topic = request.args.get("topic", "").strip()
-    if not topic:
-        return jsonify({"error": "No topic provided"}), 400
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        # Case-insensitive exact match
-        cursor.execute(
-            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
-            (topic,)
-        )
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
-        if result:
-            return jsonify({"memory": result[0], "timestamp": result[1]}), 200
-        else:
-            return jsonify({"memory": "No memory found"}), 404
-
-    except Exception as e:
+        logging.error(f"❌ ERROR in /remember: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """
-    Tries exact match first (case-insensitive).
-    If none, does a broad substring search across topic & details.
-    """
+    """Tries exact match first (case-insensitive). If none, does a broad substring search."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -193,24 +155,18 @@ def recall_or_search():
         cursor = conn.cursor()
 
         # 1) Exact match (case-insensitive)
-        cursor.execute(
-            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
-            (topic,)
-        )
+        cursor.execute("SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);", (topic,))
         exact_match = cursor.fetchone()
         logging.info(f"   • Exact match? {bool(exact_match)}")
 
         # 2) Fallback: search in both topic & details
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT topic, details, timestamp
             FROM memory
             WHERE topic ILIKE %s
                OR details ILIKE %s
             ORDER BY timestamp DESC;
-            """,
-            (f"%{topic}%", f"%{topic}%")
-        )
+        """, (f"%{topic}%", f"%{topic}%"))
         search_results = cursor.fetchall()
         logging.info(f"   • Found {len(search_results)} search results for '{topic}'.")
 
@@ -218,82 +174,19 @@ def recall_or_search():
         conn.close()
 
         response_data = {}
-
         if exact_match:
-            response_data["exact_match"] = {
-                "memory": exact_match[0],
-                "timestamp": exact_match[1]
-            }
-
+            response_data["exact_match"] = {"memory": exact_match[0], "timestamp": exact_match[1]}
         if search_results:
-            # Convert to JSON-friendly list
-            response_data["related_memories"] = [
-                {
-                    "topic": row[0],
-                    "details": row[1],
-                    "timestamp": row[2]
-                }
-                for row in search_results
-            ]
+            response_data["related_memories"] = [{"topic": row[0], "details": row[1], "timestamp": row[2]} for row in search_results]
 
         if not response_data:
-            logging.info(f"🛑 No memory found for '{topic}' in topic or details. Returning 404.")
+            logging.warning(f"🛑 No memory found for '{topic}'. Returning 404.")
             return jsonify({"memory": "No memory found"}), 404
 
-        # Return the combined data
         return jsonify(response_data), 200
 
     except Exception as e:
-        logging.info(f"❌ ERROR in /recall-or-search: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/search", methods=["GET"])
-def search_memory():
-    """
-    Search the memory database by substring in 'topic' OR 'details'.
-    (Case-insensitive, returns all matches.)
-    """
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
-
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
-
-    try:
-        logging.info(f"🔎 Searching with query='{query}' in /search endpoint.")
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT topic, details, timestamp
-            FROM memory
-            WHERE topic ILIKE %s
-               OR details ILIKE %s
-            ORDER BY timestamp DESC;
-            """,
-            (f"%{query}%", f"%{query}%")
-        )
-        results = cursor.fetchall()
-        logging.info(f"   • /search found {len(results)} results for '{query}'.")
-
-        cursor.close()
-        conn.close()
-
-        memories = []
-        for row in results:
-            memories.append({
-                "topic": row[0],
-                "details": row[1],
-                "timestamp": row[2]
-            })
-
-        return jsonify({"memories": memories}), 200
-
-    except Exception as e:
+        logging.error(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/ping-db", methods=["HEAD", "GET"])
@@ -312,5 +205,8 @@ def ping_db():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# --------------------------------------------
+# 🚀 Start Flask Server
+# --------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
