@@ -1,5 +1,6 @@
 import os
 import psycopg2
+import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
@@ -13,14 +14,14 @@ API_KEY = os.getenv("API_KEY")
 
 # Debugging confirmation
 if API_KEY:
-    print("✅ API Key successfully loaded.")
+    logging.info("✅ API Key successfully loaded.")
 else:
-    print("❌ ERROR: API Key not found. Make sure it's set in Render.")
+    logging.info("❌ ERROR: API Key not found. Make sure it's set in Render.")
 
 if DATABASE_URL:
-    print("✅ Database URL successfully loaded.")
+    logging.info("✅ Database URL successfully loaded.")
 else:
-    print("❌ ERROR: Database URL not found. Check Render settings.")
+    logging.info("❌ ERROR: Database URL not found. Check Render settings.")
 
 app = Flask(__name__)
 CORS(app)
@@ -31,7 +32,7 @@ def get_db_connection():
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
-        print(f"❌ Database Connection Error: {str(e)}")
+        logging.info(f"❌ Database Connection Error: {str(e)}")
         return None
 
 # Ensure the memory table exists
@@ -49,9 +50,9 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ Database initialized successfully.")
+        logging.info("✅ Database initialized successfully.")
     else:
-        print("❌ ERROR: Database initialization failed.")
+        logging.info("❌ ERROR: Database initialization failed.")
 
 init_db()
 
@@ -59,10 +60,10 @@ def check_api_key(req):
     """Ensure the request has a valid API key."""
     provided_key = req.headers.get("X-API-KEY")
     if not API_KEY:
-        print("❌ ERROR: API Key is missing from the environment.")
+        logging.info("❌ ERROR: API Key is missing from the environment.")
         return False
     if provided_key != API_KEY:
-        print("🚨 API KEY MISMATCH - Unauthorized request")
+        logging.info("🚨 API KEY MISMATCH - Unauthorized request")
         return False
     return True
 
@@ -158,7 +159,7 @@ def recall_or_search():
         return jsonify({"error": "No topic provided"}), 400
 
     try:
-        print(f"🔎 Incoming request to /recall-or-search?topic={topic}")
+        logging.info(f"🔎 Incoming request to /recall-or-search?topic={topic}")
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
@@ -170,7 +171,7 @@ def recall_or_search():
             (topic,)
         )
         exact_match = cursor.fetchone()
-        print(f"   • Exact match? {bool(exact_match)}")
+        logging.info(f"   • Exact match? {bool(exact_match)}")
 
         # 2) Fallback: search in both topic & details
         cursor.execute(
@@ -184,7 +185,7 @@ def recall_or_search():
             (f"%{topic}%", f"%{topic}%")
         )
         search_results = cursor.fetchall()
-        print(f"   • Found {len(search_results)} search results for '{topic}'.")
+        logging.info(f"   • Found {len(search_results)} search results for '{topic}'.")
 
         cursor.close()
         conn.close()
@@ -209,14 +210,14 @@ def recall_or_search():
             ]
 
         if not response_data:
-            print(f"🛑 No memory found for '{topic}' in topic or details. Returning 404.")
+            logging.info(f"🛑 No memory found for '{topic}' in topic or details. Returning 404.")
             return jsonify({"memory": "No memory found"}), 404
 
         # Return the combined data
         return jsonify(response_data), 200
 
     except Exception as e:
-        print(f"❌ ERROR in /recall-or-search: {str(e)}")
+        logging.info(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/search", methods=["GET"])
@@ -233,7 +234,7 @@ def search_memory():
         return jsonify({"error": "No search query provided"}), 400
 
     try:
-        print(f"🔎 Searching with query='{query}' in /search endpoint.")
+        logging.info(f"🔎 Searching with query='{query}' in /search endpoint.")
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
@@ -250,7 +251,7 @@ def search_memory():
             (f"%{query}%", f"%{query}%")
         )
         results = cursor.fetchall()
-        print(f"   • /search found {len(results)} results for '{query}'.")
+        logging.info(f"   • /search found {len(results)} results for '{query}'.")
 
         cursor.close()
         conn.close()
