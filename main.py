@@ -76,7 +76,8 @@ def remember():
         return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
-    topic = data.get("topic", "").strip().lower()
+    # Remove .lower() so we preserve the topic’s original capitalization
+    topic = data.get("topic", "").strip()  
     details = data.get("details", "").strip()
 
     if not topic or not details:
@@ -89,8 +90,12 @@ def remember():
 
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO memory (topic, details, timestamp) VALUES (%s, %s, %s) "
-            "ON CONFLICT (topic) DO UPDATE SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp;",
+            """
+            INSERT INTO memory (topic, details, timestamp)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (topic) DO UPDATE 
+            SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp;
+            """,
             (topic, details, datetime.utcnow())
         )
         conn.commit()
@@ -106,7 +111,8 @@ def recall():
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
-    topic = request.args.get("topic", "").strip().lower()
+    # Remove .lower() on the input, but do a LOWER() match in the query.
+    topic = request.args.get("topic", "").strip()
     if not topic:
         return jsonify({"error": "No topic provided"}), 400
 
@@ -116,7 +122,11 @@ def recall():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        cursor.execute("SELECT details, timestamp FROM memory WHERE topic = %s;", (topic,))
+        # CASE-INSENSITIVE MATCH:
+        cursor.execute(
+            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
+            (topic,)
+        )
         result = cursor.fetchone()
         cursor.close()
         conn.close()
