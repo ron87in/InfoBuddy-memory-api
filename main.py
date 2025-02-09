@@ -76,8 +76,7 @@ def remember():
         return jsonify({"error": "Unauthorized"}), 403
 
     data = request.json
-    # Remove .lower() so we preserve the topic’s original capitalization
-    topic = data.get("topic", "").strip()  
+    topic = data.get("topic", "").strip()
     details = data.get("details", "").strip()
 
     if not topic or not details:
@@ -111,7 +110,6 @@ def recall():
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
-    # Remove .lower() on the input, but do a LOWER() match in the query.
     topic = request.args.get("topic", "").strip()
     if not topic:
         return jsonify({"error": "No topic provided"}), 400
@@ -122,7 +120,6 @@ def recall():
             return jsonify({"error": "Database connection failed"}), 500
 
         cursor = conn.cursor()
-        # CASE-INSENSITIVE MATCH:
         cursor.execute(
             "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
             (topic,)
@@ -175,6 +172,53 @@ def ping_db():
         return jsonify({"status": "Database is active"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# -----------------------------
+# NEW: /search endpoint (case-insensitive substring search)
+# -----------------------------
+@app.route("/search", methods=["GET"])
+def search_memory():
+    """Search the memory database by substring in 'topic' OR 'details'."""
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    query = request.args.get("q", "").strip()
+    if not query:
+        return jsonify({"error": "No search query provided"}), 400
+
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+        # ILIKE is case-insensitive in Postgres. Searching in both topic and details.
+        cursor.execute(
+            """
+            SELECT topic, details, timestamp
+            FROM memory
+            WHERE topic ILIKE %s
+               OR details ILIKE %s
+            ORDER BY timestamp DESC;
+            """,
+            (f"%{query}%", f"%{query}%")
+        )
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        memories = []
+        for row in results:
+            memories.append({
+                "topic": row[0],
+                "details": row[1],
+                "timestamp": row[2]
+            })
+
+        return jsonify({"memories": memories}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
