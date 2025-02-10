@@ -4,3 +4,4 @@ flasgger
 psycopg2
 python-dotenv
 pytz
+psycopg2-binary
