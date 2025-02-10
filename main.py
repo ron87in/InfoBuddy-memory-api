@@ -20,14 +20,14 @@ API_KEY = os.getenv("API_KEY")
 
 # Debugging confirmation
 if API_KEY:
-    logging.info("✅ API Key successfully loaded.")
+    logging.info("<=3 API Key successfully loaded.")
 else:
-    logging.info("❌ ERROR: API Key not found.")
+    logging.info("<=3 ERROR: API Key not found.")
 
 if DATABASE_URL:
-    logging.info("✅ Database URL successfully loaded.")
+    logging.info("<=3 Database URL successfully loaded.")
 else:
-    logging.info("❌ ERROR: Database URL not found.")
+    logging.info("<=3 ERROR: Database URL not found.")
 
 app = Flask(__name__)
 CORS(app)
@@ -42,7 +42,7 @@ def get_db_connection():
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
-        logging.error(f"❌ Database Connection Error: {str(e)}")
+        logging.error(f"<=3 Database Connection Error: {str(e)}")
         return None
 
 ###############################################################################
@@ -68,9 +68,9 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        logging.info("✅ Database initialized successfully.")
+        logging.info("<=3 Database initialized successfully.")
     else:
-        logging.error("❌ ERROR: Database initialization failed.")
+        logging.error("<=3 ERROR: Database initialization failed.")
 
 init_db()
 
@@ -82,10 +82,10 @@ def check_api_key(req):
     """Ensure the request has a valid API key."""
     provided_key = req.headers.get("X-API-KEY")
     if not API_KEY:
-        logging.error("❌ ERROR: API Key is missing.")
+        logging.error("<=3 ERROR: API Key is missing.")
         return False
     if provided_key != API_KEY:
-        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
+        logging.warning("<=3 API KEY MISMATCH - Unauthorized request")
         return False
     return True
 
@@ -140,7 +140,7 @@ def remember():
 ###############################################################################
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Retrieve **all** memories related to a topic, searching across topics and details."""
+    """Returns **all** memories related to a topic, searching across topics and details."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -154,9 +154,9 @@ def recall_or_search():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # Search in both 'topic' column and within the JSON 'details' column
+        # Ensure the query looks for details AND topics
         cursor.execute("""
-            SELECT topic, details, timestamp
+            SELECT topic, details::text, timestamp
             FROM memory
             WHERE topic ILIKE %s
                OR details::text ILIKE %s
