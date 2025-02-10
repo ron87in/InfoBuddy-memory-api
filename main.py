@@ -167,10 +167,9 @@ def recall_or_search():
             SELECT topic, details, timestamp
             FROM memory
             WHERE topic ILIKE %s
-               OR details->>'text' ILIKE %s
-               OR details::text ILIKE %s
+               OR CAST(details AS text) ILIKE %s
             ORDER BY timestamp DESC;
-        """, (f"%{topic}%", f"%{topic}%", f"%{topic}%"))
+        """, (f"%{topic}%", f"%{topic}%"))
 
         search_results = cursor.fetchall()
         logging.info(f"🔍 Found {len(search_results)} results for topic: {topic}")  # LOGGING RESULTS COUNT
@@ -186,7 +185,7 @@ def recall_or_search():
         memories = [
             {
                 "topic": row[0] if row[0] else "[No Topic]",
-                "details": json.loads(row[1])["text"],  # Extract text from JSON
+                "details": row[1]["text"] if isinstance(row[1], dict) else str(row[1]),
                 "timestamp": row[2]
             }
             for row in search_results
