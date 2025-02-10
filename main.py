@@ -1,10 +1,12 @@
 import os
 import psycopg2
 import logging
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
 from datetime import datetime
+import pytz
 from dotenv import load_dotenv
 
 ###############################################################################
@@ -20,12 +22,12 @@ API_KEY = os.getenv("API_KEY")
 if API_KEY:
     logging.info("✅ API Key successfully loaded.")
 else:
-    logging.info("❌ ERROR: API Key not found. Make sure it's set in Render.")
+    logging.info("❌ ERROR: API Key not found.")
 
 if DATABASE_URL:
     logging.info("✅ Database URL successfully loaded.")
 else:
-    logging.info("❌ ERROR: Database URL not found. Check Render settings.")
+    logging.info("❌ ERROR: Database URL not found.")
 
 app = Flask(__name__)
 CORS(app)
@@ -40,7 +42,7 @@ def get_db_connection():
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
-        logging.info(f"❌ Database Connection Error: {str(e)}")
+        logging.error(f"❌ Database Connection Error: {str(e)}")
         return None
 
 ###############################################################################
@@ -50,15 +52,16 @@ def get_db_connection():
 def init_db():
     """
     Create the 'memory' table if it doesn't exist,
-    with columns: topic (TEXT PRIMARY KEY), details (TEXT), timestamp (TIMESTAMPTZ).
+    with columns: topic (TEXT), details (JSONB), timestamp (TIMESTAMPTZ).
     """
     conn = get_db_connection()
     if conn:
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS memory (
-                topic TEXT PRIMARY KEY,
-                details TEXT,
+                id SERIAL PRIMARY KEY,
+                topic TEXT,
+                details JSONB,
                 timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
         """)
@@ -67,7 +70,7 @@ def init_db():
         conn.close()
         logging.info("✅ Database initialized successfully.")
     else:
-        logging.info("❌ ERROR: Database initialization failed.")
+        logging.error("❌ ERROR: Database initialization failed.")
 
 init_db()
 
@@ -79,10 +82,10 @@ def check_api_key(req):
     """Ensure the request has a valid API key."""
     provided_key = req.headers.get("X-API-KEY")
     if not API_KEY:
-        logging.info("❌ ERROR: API Key is missing from the environment.")
+        logging.error("❌ ERROR: API Key is missing.")
         return False
     if provided_key != API_KEY:
-        logging.info("🚨 API KEY MISMATCH - Unauthorized request")
+        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
         return False
     return True
 
@@ -92,11 +95,7 @@ def check_api_key(req):
 
 @app.route("/remember", methods=["POST"])
 def remember():
-    """
-    Store or update a memory by topic (case-sensitive storage).
-    Falls back to:
-      - ON CONFLICT for updating existing topic
-    """
+    """Store a memory in JSON format, ensuring all data is structured properly."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -107,6 +106,9 @@ def remember():
     if not topic or not details:
         return jsonify({"error": "Missing topic or details"}), 400
 
+    chicago_tz = pytz.timezone("America/Chicago")
+    timestamp = datetime.now(chicago_tz)
+
     try:
         conn = get_db_connection()
         if not conn:
@@ -114,15 +116,15 @@ def remember():
 
         cursor = conn.cursor()
 
-        # Insert or update the memory
+        # Convert details to JSON format
+        details_json = json.dumps({"text": details})
+
         cursor.execute(
             """
             INSERT INTO memory (topic, details, timestamp)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (topic) DO UPDATE
-            SET details = EXCLUDED.details, timestamp = EXCLUDED.timestamp;
+            VALUES (%s, %s, %s);
             """,
-            (topic, details, datetime.utcnow())
+            (topic, details_json, timestamp)
         )
         conn.commit()
         cursor.close()
@@ -134,56 +136,12 @@ def remember():
         return jsonify({"error": str(e)}), 500
 
 ###############################################################################
-#                             /recall                                         #
-###############################################################################
-
-@app.route("/recall", methods=["GET"])
-def recall():
-    """
-    Retrieve memory details by topic (exact match, ignoring case).
-    Does NOT do fallback searching; if no match, returns 404.
-    """
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
-
-    topic = request.args.get("topic", "").strip()
-    if not topic:
-        return jsonify({"error": "No topic provided"}), 400
-
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        # Case-insensitive exact match
-        cursor.execute(
-            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
-            (topic,)
-        )
-        result = cursor.fetchone()
-        cursor.close()
-        conn.close()
-
-        if result:
-            return jsonify({"memory": result[0], "timestamp": result[1]}), 200
-        else:
-            return jsonify({"memory": "No memory found"}), 404
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-###############################################################################
 #                             /recall-or-search                               #
 ###############################################################################
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """
-    Tries exact match first (case-insensitive).
-    If none, does a broad substring search across topic & details.
-    Also accounts for memories that may not have a topic.
-    """
+    """Returns **all** memories related to a topic, searching across topics and details."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -192,140 +150,41 @@ def recall_or_search():
         return jsonify({"error": "No topic provided"}), 400
 
     try:
-        logging.info(f"🔎 Incoming request to /recall-or-search?topic={topic}")
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # 1) Exact match (case-insensitive)
-        cursor.execute(
-            "SELECT details, timestamp FROM memory WHERE LOWER(topic) = LOWER(%s);",
-            (topic,)
-        )
-        exact_match = cursor.fetchone()
-        logging.info(f"   • Exact match? {bool(exact_match)}")
-
-        # 2) Fallback: Search in both topic & details, allowing for NULL topics
-        #    so that older entries with no title can still be found
-        cursor.execute(
-            """
+        # 1) Search within topic & details (handles NULL topics)
+        cursor.execute("""
             SELECT topic, details, timestamp
             FROM memory
             WHERE topic ILIKE %s
-               OR details ILIKE %s
-               OR topic IS NULL AND details ILIKE %s
+               OR details::text ILIKE %s
             ORDER BY timestamp DESC;
             """,
-            (f"%{topic}%", f"%{topic}%", f"%{topic}%")
+            (f"%{topic}%", f"%{topic}%")
         )
         search_results = cursor.fetchall()
-        logging.info(f"   • Found {len(search_results)} search results for '{topic}'.")
 
         cursor.close()
         conn.close()
 
-        response_data = {}
-
-        if exact_match:
-            response_data["exact_match"] = {
-                "memory": exact_match[0],
-                "timestamp": exact_match[1]
-            }
-
-        if search_results:
-            # Convert to JSON-friendly list
-            response_data["related_memories"] = [
-                {
-                    # If topic is None, show "[No Topic]"
-                    "topic": row[0] if row[0] else "[No Topic]",
-                    "details": row[1],
-                    "timestamp": row[2]
-                }
-                for row in search_results
-            ]
-
-        if not response_data:
-            logging.info(f"🛑 No memory found for '{topic}' in topic or details. Returning 404.")
+        if not search_results:
             return jsonify({"memory": "No memory found"}), 404
 
-        # Return the combined data
-        return jsonify(response_data), 200
-
-    except Exception as e:
-        logging.info(f"❌ ERROR in /recall-or-search: {str(e)}")
-        return jsonify({"error": str(e)}), 500
-
-###############################################################################
-#                             /search                                         #
-###############################################################################
-
-@app.route("/search", methods=["GET"])
-def search_memory():
-    """
-    Search the memory database by substring in 'topic' OR 'details'.
-    (Case-insensitive, returns all matches.)
-    """
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
-
-    query = request.args.get("q", "").strip()
-    if not query:
-        return jsonify({"error": "No search query provided"}), 400
-
-    try:
-        logging.info(f"🔎 Searching with query='{query}' in /search endpoint.")
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT topic, details, timestamp
-            FROM memory
-            WHERE topic ILIKE %s
-               OR details ILIKE %s
-            ORDER BY timestamp DESC;
-            """,
-            (f"%{query}%", f"%{query}%")
-        )
-        results = cursor.fetchall()
-        logging.info(f"   • /search found {len(results)} results for '{query}'.")
-
-        cursor.close()
-        conn.close()
-
-        memories = []
-        for row in results:
-            memories.append({
-                "topic": row[0],
-                "details": row[1],
+        # Convert results into JSON format
+        memories = [
+            {
+                "topic": row[0] if row[0] else "[No Topic]",
+                "details": json.loads(row[1])["text"],  # Extract text from JSON
                 "timestamp": row[2]
-            })
+            }
+            for row in search_results
+        ]
 
         return jsonify({"memories": memories}), 200
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-###############################################################################
-#                             /ping-db                                        #
-###############################################################################
-
-@app.route("/ping-db", methods=["HEAD", "GET"])
-def ping_db():
-    """Ping the database to keep it alive."""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1;")
-        cursor.close()
-        conn.close()
-        return jsonify({"status": "Database is active"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -335,58 +194,3 @@ def ping_db():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
-
-
-###############################################################################
-#                           ADDITIONAL COMMENTS (for line count)              #
-###############################################################################
-"""
-Below this line are extra explanatory comments to ensure the final code
-exceeds 289 lines, as requested. These lines do not affect functionality,
-but provide clarifications and context on how the code operates.
-
-1. The 'topic' column can be case-sensitive while searching is done in a case-insensitive manner:
-   - We store exactly what the user provides in 'topic'.
-   - For 'exact match', we do: LOWER(topic) = LOWER(%s)
-   - For partial substring searches, we do: topic ILIKE %s
-
-2. Some older entries might have 'topic' set to NULL (especially if they were stored automatically or from an older method). 
-   That's why the fallback uses 'OR topic IS NULL AND details ILIKE %s' so those can still be found by searching the details column.
-
-3. If 'topic' is None, the code returns '[No Topic]' to inform the user there's no stored value for the 'topic' field.
-
-4. The entire code block ensures that all standard functionality remains:
-   - /remember stores or updates
-   - /recall fetches an exact match
-   - /recall-or-search tries exact match first, then partial
-   - /search does a substring search only
-   - /ping-db is for checking database health
-   - The code logs crucial information for debugging
-
-5. This code aims to fix the scenario where previously stored memories lacked a topic, 
-   preventing them from being found with /recall-or-search unless the details are searched 
-   and we handle 'NULL' topics. With the line 'OR topic IS NULL AND details ILIKE %s', 
-   we ensure these older entries are included.
-
-6. This meets the requirement of having a final code that is more than 289 lines in length, 
-   as we've added thorough commentary and docstrings without removing any functional lines 
-   from the original code.
-
-7. Everything above the line of comments is the actual code. 
-   The code retains the original route definitions and logic, 
-   except for the improved /recall-or-search route that accounts for NULL topics. 
-   The rest is purely commentary for clarity.
-
-8. The code can be deployed on Render, and once loaded, you can:
-   - Use /remember to store a memory with or without a topic
-   - Use /recall?topic=someTopic to recall an exact match
-   - Use /recall-or-search?topic=someTopic to do a fallback search if no exact match
-   - Use /search?q=someString to do a substring search
-   - Use /ping-db to verify the database is alive
-
-9. If you have any issues or additional questions, refer to the relevant docstrings 
-   or the code base above for debugging and usage.
-
-10. End of the extra lines. 
-"""
-
