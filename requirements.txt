@@ -3,3 +3,4 @@ flask_cors
 flasgger
 psycopg2
 python-dotenv
+pytz
