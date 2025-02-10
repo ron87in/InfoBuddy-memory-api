@@ -116,13 +116,19 @@ def remember():
 
         cursor = conn.cursor()
 
-        # Convert details to JSON format
-        details_json = json.dumps({"text": details})
+        # Ensure details is proper JSONB
+        if isinstance(details, str):
+            details_json = json.dumps({"text": details})
+        elif isinstance(details, dict):
+            details_json = json.dumps(details)
+        else:
+            return jsonify({"error": "Invalid details format"}), 400
 
         cursor.execute(
             """
             INSERT INTO memory (topic, details, timestamp)
-            VALUES (%s, %s, %s);
+            VALUES (%s, %s::jsonb, %s)
+            RETURNING id;
             """,
             (topic, details_json, timestamp)
         )
@@ -158,12 +164,13 @@ def recall_or_search():
 
         # 1) Search in topic & JSONB details
         cursor.execute("""
-            SELECT topic, details::text, timestamp
+            SELECT topic, details, timestamp
             FROM memory
             WHERE topic ILIKE %s
                OR details->>'text' ILIKE %s
+               OR details::text ILIKE %s
             ORDER BY timestamp DESC;
-        """, (f"%{topic}%", f"%{topic}%"))
+        """, (f"%{topic}%", f"%{topic}%", f"%{topic}%"))
 
         search_results = cursor.fetchall()
         logging.info(f"🔍 Found {len(search_results)} results for topic: {topic}")  # LOGGING RESULTS COUNT
