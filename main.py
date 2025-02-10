@@ -2,11 +2,11 @@ import os
 import psycopg2
 import logging
 import json
+import pytz
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flasgger import Swagger
 from datetime import datetime
-import pytz
 from dotenv import load_dotenv
 
 ###############################################################################
