@@ -20,14 +20,14 @@ API_KEY = os.getenv("API_KEY")
 
 # Debugging confirmation
 if API_KEY:
-    logging.info("<=3 API Key successfully loaded.")
+    logging.info("✅ API Key successfully loaded.")
 else:
-    logging.info("<=3 ERROR: API Key not found.")
+    logging.info("❌ ERROR: API Key not found.")
 
 if DATABASE_URL:
-    logging.info("<=3 Database URL successfully loaded.")
+    logging.info("✅ Database URL successfully loaded.")
 else:
-    logging.info("<=3 ERROR: Database URL not found.")
+    logging.info("❌ ERROR: Database URL not found.")
 
 app = Flask(__name__)
 CORS(app)
@@ -42,7 +42,7 @@ def get_db_connection():
     try:
         return psycopg2.connect(DATABASE_URL)
     except Exception as e:
-        logging.error(f"<=3 Database Connection Error: {str(e)}")
+        logging.error(f"❌ Database Connection Error: {str(e)}")
         return None
 
 ###############################################################################
@@ -68,9 +68,9 @@ def init_db():
         conn.commit()
         cursor.close()
         conn.close()
-        logging.info("<=3 Database initialized successfully.")
+        logging.info("✅ Database initialized successfully.")
     else:
-        logging.error("<=3 ERROR: Database initialization failed.")
+        logging.error("❌ ERROR: Database initialization failed.")
 
 init_db()
 
@@ -82,10 +82,10 @@ def check_api_key(req):
     """Ensure the request has a valid API key."""
     provided_key = req.headers.get("X-API-KEY")
     if not API_KEY:
-        logging.error("<=3 ERROR: API Key is missing.")
+        logging.error("❌ ERROR: API Key is missing.")
         return False
     if provided_key != API_KEY:
-        logging.warning("<=3 API KEY MISMATCH - Unauthorized request")
+        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
         return False
     return True
 
@@ -140,7 +140,7 @@ def remember():
 ###############################################################################
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Returns **all** memories related to a topic, searching across topics and details."""
+    """Retrieve **all** memories related to a topic, searching across topics and details."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -148,28 +148,31 @@ def recall_or_search():
     if not topic:
         return jsonify({"error": "No topic provided"}), 400
 
+    logging.info(f"🔍 Searching for topic: {topic}")  # LOGGING SEARCH
+
     try:
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # Ensure the query looks for details AND topics
+        # 1) Search in topic & JSONB details
         cursor.execute("""
             SELECT topic, details::text, timestamp
             FROM memory
             WHERE topic ILIKE %s
-               OR details::text ILIKE %s
+               OR details->>'text' ILIKE %s
             ORDER BY timestamp DESC;
-            """,
-            (f"%{topic}%", f"%{topic}%")
-        )
+        """, (f"%{topic}%", f"%{topic}%"))
+
         search_results = cursor.fetchall()
+        logging.info(f"🔍 Found {len(search_results)} results for topic: {topic}")  # LOGGING RESULTS COUNT
 
         cursor.close()
         conn.close()
 
         if not search_results:
+            logging.info(f"⚠️ No memories found for '{topic}'.")
             return jsonify({"memory": "No memory found"}), 404
 
         # Convert results into JSON format
@@ -182,10 +185,13 @@ def recall_or_search():
             for row in search_results
         ]
 
+        logging.info(f"✅ Returning {len(memories)} memories for topic: {topic}")
         return jsonify({"memories": memories}), 200
 
     except Exception as e:
+        logging.error(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
 
 ###############################################################################
 #                             MAIN APP RUN                                    #
