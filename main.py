@@ -99,12 +99,18 @@ def remember():
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
-    data = request.json
-    topic = data.get("topic", "").strip()
-    details = data.get("details", "").strip()
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
+        topic = data.get("topic", "").strip()
+        details = data.get("details", "").strip()
 
-    if not topic or not details:
-        return jsonify({"error": "Missing topic or details"}), 400
+        if not topic or not details:
+            return jsonify({"error": "Missing topic or details"}), 400
+
+        logging.info(f"Attempting to store memory - Topic: {topic}, Details: {details}")
 
     chicago_tz = pytz.timezone("America/Chicago")
     timestamp = datetime.now(chicago_tz)
