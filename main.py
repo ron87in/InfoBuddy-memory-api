@@ -138,10 +138,9 @@ def remember():
 ###############################################################################
 #                             /recall-or-search                               #
 ###############################################################################
-
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Returns **all** memories related to a topic, searching across topics and details."""
+    """Retrieve **all** memories related to a topic, searching across topics and details."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -155,7 +154,7 @@ def recall_or_search():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # 1) Search within topic & details (handles NULL topics)
+        # Search in both 'topic' column and within the JSON 'details' column
         cursor.execute("""
             SELECT topic, details, timestamp
             FROM memory
