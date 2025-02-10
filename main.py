@@ -163,33 +163,48 @@ def recall_or_search():
         cursor = conn.cursor()
 
         # 1) Search in topic & JSONB details
+        # First, let's check if we have any records at all
+        cursor.execute("SELECT COUNT(*) FROM memory")
+        total_count = cursor.fetchone()[0]
+        logging.info(f"📊 Total records in database: {total_count}")
+
+        # Now perform the search
         cursor.execute("""
-            SELECT topic, details, timestamp
-            FROM memory
-            WHERE topic ILIKE %s
-               OR CAST(details AS text) ILIKE %s
+            SELECT topic, details, timestamp 
+            FROM memory 
+            WHERE topic ILIKE %s 
+               OR details::text ILIKE %s
             ORDER BY timestamp DESC;
         """, (f"%{topic}%", f"%{topic}%"))
 
         search_results = cursor.fetchall()
-        logging.info(f"🔍 Found {len(search_results)} results for topic: {topic}")  # LOGGING RESULTS COUNT
+        logging.info(f"🔍 Found {len(search_results)} results for topic: {topic}")
 
         cursor.close()
         conn.close()
 
         if not search_results:
-            logging.info(f"⚠️ No memories found for '{topic}'.")
-            return jsonify({"memory": "No memory found"}), 404
+            if total_count == 0:
+                return jsonify({"error": "Database is empty"}), 404
+            return jsonify({"error": f"No memories found matching '{topic}'"}), 404
 
         # Convert results into JSON format
-        memories = [
-            {
-                "topic": row[0] if row[0] else "[No Topic]",
-                "details": row[1]["text"] if isinstance(row[1], dict) else str(row[1]),
-                "timestamp": row[2]
-            }
-            for row in search_results
-        ]
+        memories = []
+        for row in search_results:
+            try:
+                details = row[1]
+                if isinstance(details, str):
+                    details = json.loads(details)
+                
+                memory = {
+                    "topic": row[0] if row[0] else "[No Topic]",
+                    "details": details["text"] if isinstance(details, dict) and "text" in details else str(details),
+                    "timestamp": row[2].isoformat() if row[2] else None
+                }
+                memories.append(memory)
+            except Exception as e:
+                logging.error(f"Error parsing memory: {e}")
+                continue
 
         logging.info(f"✅ Returning {len(memories)} memories for topic: {topic}")
         return jsonify({"memories": memories}), 200
