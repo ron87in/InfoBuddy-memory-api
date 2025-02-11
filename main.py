@@ -358,6 +358,59 @@ def restore():
     else:
         return jsonify({"error": "Failed to restore memories"}), 500
 
+
+###############################################################################
+#                             DELETE ENDPOINT                                 #
+###############################################################################
+
+@app.route("/delete", methods=["DELETE"])
+def delete_memory():
+    """Delete a specific memory by topic and timestamp."""
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+
+        topic = data.get("topic")
+        timestamp = data.get("timestamp")
+
+        if not topic or not timestamp:
+            return jsonify({"error": "Missing topic or timestamp"}), 400
+
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cursor = conn.cursor()
+
+        # Create backup before deletion
+        backup_database()
+
+        cursor.execute(
+            """
+            DELETE FROM memory 
+            WHERE topic = %s AND timestamp = %s::timestamptz
+            RETURNING id
+            """,
+            (topic, timestamp)
+        )
+
+        deleted = cursor.fetchone()
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        if deleted:
+            return jsonify({"message": f"Memory deleted: '{topic}'"}), 200
+        else:
+            return jsonify({"error": "Memory not found"}), 404
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 ###############################################################################
 #                             MAIN APP RUN                                    #
 ###############################################################################
