@@ -121,7 +121,6 @@ def remember():
         chicago_tz = pytz.timezone("America/Chicago")
         timestamp = datetime.now(chicago_tz)
 
-    try:
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
