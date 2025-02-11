@@ -106,12 +106,12 @@ def remember():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        data = request.json
+        data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
             
-        topic = data.get("topic", "").strip()
-        details = data.get("details", "").strip()
+        topic = str(data.get("topic", "")).strip()
+        details = str(data.get("details", "")).strip()
 
         if not topic or not details:
             return jsonify({"error": "Missing topic or details"}), 400
@@ -124,6 +124,8 @@ def remember():
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
+
+        logging.info("Database connection successful")
 
         cursor = conn.cursor()
 
