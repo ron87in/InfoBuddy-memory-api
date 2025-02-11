@@ -64,9 +64,10 @@ def init_db():
     if conn:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS memory (
+            DROP TABLE IF EXISTS memory;
+            CREATE TABLE memory (
                 id SERIAL PRIMARY KEY,
-                topic TEXT,
+                topic TEXT NOT NULL,
                 details JSONB,
                 timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
             );
