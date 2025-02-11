@@ -370,12 +370,8 @@ def delete_memory():
         return jsonify({"error": "Unauthorized"}), 403
 
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No JSON data provided"}), 400
-
-        topic = data.get("topic")
-        timestamp = data.get("timestamp")
+        topic = request.args.get("topic")
+        timestamp = request.args.get("timestamp")
 
         if not topic or not timestamp:
             return jsonify({"error": "Missing topic or timestamp"}), 400
