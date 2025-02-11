@@ -18,6 +18,12 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL")
 API_KEY = os.getenv("API_KEY")
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
 # Debugging confirmation
 if API_KEY:
     logging.info("✅ API Key successfully loaded.")
@@ -112,8 +118,8 @@ def remember():
 
         logging.info(f"Attempting to store memory - Topic: {topic}, Details: {details}")
 
-    chicago_tz = pytz.timezone("America/Chicago")
-    timestamp = datetime.now(chicago_tz)
+        chicago_tz = pytz.timezone("America/Chicago")
+        timestamp = datetime.now(chicago_tz)
 
     try:
         conn = get_db_connection()
