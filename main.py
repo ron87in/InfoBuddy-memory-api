@@ -141,7 +141,6 @@ def remember():
             """
             INSERT INTO memory (topic, details, timestamp)
             VALUES (%s, %s::jsonb, %s)
-            RETURNING id;
             """,
             (topic, details_json, timestamp)
         )
