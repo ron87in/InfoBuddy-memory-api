@@ -449,3 +449,24 @@ def delete_memory():
         conn.commit()
         cursor.close()
         conn.close()
+
+  deleted = cursor.fetchone()
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    if deleted:
+        return jsonify({"message": f"Memory deleted: '{title}'"}), 200
+    else:
+        return jsonify({"error": "Memory not found"}), 404
+
+except Exception as e:
+    return jsonify({"error": str(e)}), 500
+
+###############################################################################
+#                             MAIN APP RUN                                    #
+###############################################################################
+
+if __name__ == "__main__":
+safe_init_db()  # Initialize database safely
+app.run(host="0.0.0.0", port=10000)
