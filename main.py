@@ -25,18 +25,56 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# Define valid memory categories
+# Define valid memory categories with descriptions
 class MemoryCategory(Enum):
-    WORK_AND_MILITARY = 'work_and_military'
-    PERSONAL_GROWTH = 'personal_growth'
-    ADVENTURE_AND_TRAVEL = 'adventure_and_travel'
-    HOBBIES_AND_INTERESTS = 'hobbies_and_interests'
-    ROMANTIC_RELATIONSHIPS = 'romantic_relationships'
-    FRIENDS_AND_FAMILY = 'friends_and_family'
-    UPBRINGING_AND_LORE = 'upbringing_and_lore'
-    INFOBUDDY_RELATIONSHIP = 'infobuddy_relationship'
-    INFOBUDDY_TECHNICAL = 'infobuddy_technical'
-    MISCELLANEOUS = 'miscellaneous'
+    WORK_AND_MILITARY = {
+        'value': 'work_and_military',
+        'description': 'Army service, workplace experiences, career decisions, professional ethics'
+    }
+    PERSONAL_GROWTH = {
+        'value': 'personal_growth',
+        'description': 'Self-improvement, emotional processing, mental health, morals & ideals'
+    }
+    ADVENTURE_AND_TRAVEL = {
+        'value': 'adventure_and_travel',
+        'description': 'Moving & relocation, travel experiences, spontaneous experiences, long-term travel goals'
+    }
+    HOBBIES_AND_INTERESTS = {
+        'value': 'hobbies_and_interests',
+        'description': 'Creative activities, entertainment, fitness & sports, personal projects'
+    }
+    ROMANTIC_RELATIONSHIPS = {
+        'value': 'romantic_relationships',
+        'description': 'Dating experiences, relationship struggles, love & attraction'
+    }
+    FRIENDS_AND_FAMILY = {
+        'value': 'friends_and_family',
+        'description': 'Current relationships, family interactions, social struggles'
+    }
+    UPBRINGING_AND_LORE = {
+        'value': 'upbringing_and_lore',
+        'description': 'Childhood memories, past experiences, family history'
+    }
+    INFOBUDDY_RELATIONSHIP = {
+        'value': 'infobuddy_relationship',
+        'description': 'Conversations about AI companionship, memory continuity, friendship aspect'
+    }
+    INFOBUDDY_TECHNICAL = {
+        'value': 'infobuddy_technical',
+        'description': 'Software development, feature planning, system improvements, future AI vision'
+    }
+    MISCELLANEOUS = {
+        'value': 'miscellaneous',
+        'description': 'Anything that doesn\'t fit neatly into another category'
+    }
+
+    @classmethod
+    def get_values(cls):
+        return [member.value['value'] for member in cls]
+
+    @classmethod
+    def get_descriptions(cls):
+        return {member.value['value']: member.value['description'] for member in cls}
 
 # Debugging confirmation
 if API_KEY:
@@ -90,12 +128,33 @@ def safe_init_db():
 
             if not table_exists:
                 logging.info("Creating memory table for the first time...")
+                # First ensure the enum type exists
+                cursor.execute("""
+                    DO $$ 
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'memory_category') THEN
+                            CREATE TYPE memory_category AS ENUM (
+                                'work_and_military',
+                                'personal_growth',
+                                'adventure_and_travel',
+                                'hobbies_and_interests',
+                                'romantic_relationships',
+                                'friends_and_family',
+                                'upbringing_and_lore',
+                                'infobuddy_relationship',
+                                'infobuddy_technical',
+                                'miscellaneous'
+                            );
+                        END IF;
+                    END $$;
+                """)
+
                 cursor.execute("""
                     CREATE TABLE memory (
                         id SERIAL PRIMARY KEY,
                         title TEXT NOT NULL,
                         details JSONB,
-                        category memory_category NOT NULL,
+                        categories memory_category[] NOT NULL,
                         timestamp TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
@@ -107,7 +166,7 @@ def safe_init_db():
             # Create indexes for better search performance
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_memory_title ON memory (title);
-                CREATE INDEX IF NOT EXISTS idx_memory_category ON memory (category);
+                CREATE INDEX IF NOT EXISTS idx_memory_categories ON memory USING gin (categories);
                 CREATE INDEX IF NOT EXISTS idx_memory_timestamp ON memory (timestamp);
             """)
             conn.commit()
@@ -137,7 +196,7 @@ def backup_database():
         try:
             cursor = conn.cursor()
             cursor.execute("""
-                SELECT title, details, category, timestamp 
+                SELECT title, details, categories, timestamp 
                 FROM memory 
                 ORDER BY timestamp DESC
             """)
@@ -148,7 +207,7 @@ def backup_database():
                 backup_data.append({
                     "title": memory[0],
                     "details": memory[1],
-                    "category": memory[2],
+                    "categories": memory[2],
                     "timestamp": memory[3].isoformat()
                 })
 
@@ -193,7 +252,7 @@ def check_api_key(req):
 
 @app.route("/remember", methods=["POST"])
 def remember():
-    """Store a memory with title, details, and category."""
+    """Store a memory with title, details, and multiple categories."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -204,18 +263,25 @@ def remember():
 
         title = str(data.get("title", "")).strip()
         details = str(data.get("details", "")).strip()
-        category = data.get("category", "").strip()
+        categories = data.get("categories", [])
 
-        if not title or not details or not category:
-            return jsonify({"error": "Missing title, details, or category"}), 400
+        if not title or not details or not categories:
+            return jsonify({"error": "Missing title, details, or categories"}), 400
 
-        # Validate category
-        try:
-            category = MemoryCategory(category).value
-        except ValueError:
-            return jsonify({"error": f"Invalid category. Must be one of: {[c.value for c in MemoryCategory]}"}), 400
+        if not isinstance(categories, list):
+            return jsonify({"error": "Categories must be provided as a list"}), 400
 
-        logging.info(f"Attempting to store memory - Title: {title}, Category: {category}")
+        # Validate categories
+        valid_categories = MemoryCategory.get_values()
+        categories = [cat.strip() for cat in categories]
+
+        invalid_categories = [cat for cat in categories if cat not in valid_categories]
+        if invalid_categories:
+            return jsonify({
+                "error": f"Invalid categories: {invalid_categories}. Must be one or more of: {valid_categories}"
+            }), 400
+
+        logging.info(f"Attempting to store memory - Title: {title}, Categories: {categories}")
 
         chicago_tz = pytz.timezone("America/Chicago")
         timestamp = datetime.now(chicago_tz)
@@ -236,10 +302,10 @@ def remember():
 
         cursor.execute(
             """
-            INSERT INTO memory (title, details, category, timestamp)
-            VALUES (%s, %s::jsonb, %s::memory_category, %s)
+            INSERT INTO memory (title, details, categories, timestamp)
+            VALUES (%s, %s::jsonb, %s::memory_category[], %s)
             """,
-            (title, details_json, category, timestamp)
+            (title, details_json, categories, timestamp)
         )
         conn.commit()
         cursor.close()
@@ -250,7 +316,7 @@ def remember():
 
         return jsonify({
             "message": f"Memory stored: '{title}'",
-            "category": category
+            "categories": categories
         }), 200
 
     except Exception as e:
@@ -258,7 +324,7 @@ def remember():
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Retrieve memories by title, details, or category."""
+    """Retrieve memories by title, details, or categories."""
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
@@ -269,10 +335,10 @@ def recall_or_search():
         return jsonify({"error": "No search term or category provided"}), 400
 
     if category:
-        try:
-            category = MemoryCategory(category).value
-        except ValueError:
-            return jsonify({"error": f"Invalid category. Must be one of: {[c.value for c in MemoryCategory]}"}), 400
+        if category not in MemoryCategory.get_values():
+            return jsonify({
+                "error": f"Invalid category. Must be one of: {MemoryCategory.get_values()}"
+            }), 400
 
     logging.info(f"🔍 Searching - Term: {search_term}, Category: {category}")
 
@@ -294,11 +360,11 @@ def recall_or_search():
             query_params.extend([f"%{search_term}%", f"%{search_term}%"])
 
         if category:
-            query_parts.append("category = %s::memory_category")
+            query_parts.append("%s::memory_category = ANY(categories)")
             query_params.append(category)
 
         query = f"""
-            SELECT title, details, category, timestamp 
+            SELECT title, details, categories, timestamp 
             FROM memory 
             WHERE {' OR '.join(query_parts) if search_term else query_parts[0]}
             ORDER BY timestamp DESC;
@@ -330,7 +396,7 @@ def recall_or_search():
                 memory = {
                     "title": row[0],
                     "details": details["text"] if isinstance(details, dict) and "text" in details else str(details),
-                    "category": row[2],
+                    "categories": row[2],
                     "timestamp": row[3].isoformat() if row[3] else None
                 }
                 memories.append(memory)
@@ -383,19 +449,3 @@ def delete_memory():
         conn.commit()
         cursor.close()
         conn.close()
-
-        if deleted:
-            return jsonify({"message": f"Memory deleted: '{title}'"}), 200
-        else:
-            return jsonify({"error": "Memory not found"}), 404
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-###############################################################################
-#                             MAIN APP RUN                                    #
-###############################################################################
-
-if __name__ == "__main__":
-    safe_init_db()  # Initialize database safely
-    app.run(host="0.0.0.0", port=10000)
