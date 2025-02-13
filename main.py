@@ -450,12 +450,12 @@ def delete_memory():
             """
             DELETE FROM memory 
             WHERE title = %s AND timestamp = %s::timestamptz
-            RETURNING id
             """,
             (title, timestamp)
         )
 
-        deleted = cursor.fetchone()
+        # Check if any rows were deleted
+        deleted = cursor.rowcount > 0
         conn.commit()
         cursor.close()
         conn.close()
