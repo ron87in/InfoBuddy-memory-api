@@ -1,4 +1,3 @@
-
 import os
 import psycopg2
 import logging
@@ -11,9 +10,8 @@ from datetime import datetime
 from dotenv import load_dotenv
 from enum import Enum
 
-
 ###############################################################################
-#                             ENV & APP SETUP                                   #
+#                             ENV & APP SETUP                                  #
 ###############################################################################
 
 # Load environment variables
@@ -78,15 +76,14 @@ class MemoryCategory(Enum):
     def get_descriptions(cls):
         return {member.value['value']: member.value['description'] for member in cls}
 
-
 # Debugging confirmation
 if API_KEY:
-    logging.debug("✅ API Key successfully loaded.")
+    logging.info("✅ API Key loaded (not used currently).")
 else:
-    logging.error("❌ ERROR: API Key not found.")
+    logging.info("❌ No API Key found (not used currently).")
 
 if DATABASE_URL:
-    logging.debug("✅ Database URL successfully loaded.")
+    logging.info("✅ Database URL loaded.")
 else:
     logging.error("❌ ERROR: Database URL not found.")
 
@@ -94,9 +91,8 @@ app = Flask(__name__)
 CORS(app)
 Swagger(app)
 
-
 ###############################################################################
-#                             DB CONNECTION                                     #
+#                             DB CONNECTION                                    #
 ###############################################################################
 
 def get_db_connection():
@@ -107,9 +103,8 @@ def get_db_connection():
         logging.error(f"❌ Database Connection Error: {str(e)}")
         return None
 
-
 ###############################################################################
-#                             INIT DB                                          #
+#                             INIT DB                                         #
 ###############################################################################
 
 def safe_init_db():
@@ -190,9 +185,8 @@ def safe_init_db():
     else:
         logging.error("❌ ERROR: Database initialization failed - couldn't connect.")
 
-
 ###############################################################################
-#                             BACKUP FUNCTIONS                                  #
+#                             BACKUP FUNCTIONS                                 #
 ###############################################################################
 
 def backup_database():
@@ -237,62 +231,14 @@ def backup_database():
             conn.close()
     return None
 
-
 ###############################################################################
-#                             CHECK API KEY                                     #
-###############################################################################
-
-def check_api_key(req):
-    """
-    Ensure the request has a valid API key.
-    It first looks for an Authorization header with a Bearer token (case-insensitive),
-    then falls back to the X-API-KEY header.
-    """
-    token = None
-
-    # Log the headers (for debugging purposes only)
-    logging.debug("Incoming Authorization header: %s", req.headers.get("Authorization"))
-    logging.debug("Incoming X-API-KEY header: %s", req.headers.get("X-API-KEY"))
-
-    # Check for the Authorization header (case-insensitive check)
-    auth_header = req.headers.get("Authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-
-    # Fallback: check for the X-API-KEY header if no Bearer token found
-    if not token:
-        token = req.headers.get("X-API-KEY")
-
-    # Log if token is missing
-    if not token:
-        logging.warning("🚨 Missing API key in headers")
-        return False
-
-    # Ensure the environment API key is loaded and trimmed
-    expected_key = API_KEY.strip() if API_KEY else None
-    if not expected_key:
-        logging.error("❌ ERROR: API Key is missing from environment.")
-        return False
-
-    # Compare the provided token with the expected API key
-    if token != expected_key:
-        logging.warning("🚨 API KEY MISMATCH - Unauthorized request. Provided: %s", token)
-        return False
-
-    return True
-
-
-
-
-###############################################################################
-#                             MEMORY HANDLERS                                   #
+#                             MEMORY HANDLERS                                 #
 ###############################################################################
 
 @app.route("/remember", methods=["POST"])
 def remember():
     """Store a memory with title, details, and multiple categories."""
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
+    # No authentication check here
 
     try:
         data = request.get_json()
@@ -364,8 +310,7 @@ def remember():
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
     """Retrieve memories by title, details, or categories."""
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
+    # No authentication check here
 
     search_term = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
@@ -437,15 +382,10 @@ def recall_or_search():
         return jsonify({"error": str(e)}), 500
 
 
-###############################################################################
-#                             DELETE ENDPOINT                                   #
-###############################################################################
-
 @app.route("/delete", methods=["DELETE"])
 def delete_memory():
     """Delete a specific memory by title and timestamp."""
-    if not check_api_key(request):
-        return jsonify({"error": "Unauthorized"}), 403
+    # No authentication check here
 
     try:
         title = request.args.get("title")
@@ -485,9 +425,8 @@ def delete_memory():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 ###############################################################################
-#                             MAIN APP RUN                                      #
+#                            MAIN APP RUN                                     #
 ###############################################################################
 
 if __name__ == "__main__":
