@@ -81,12 +81,12 @@ class MemoryCategory(Enum):
 
 # Debugging confirmation
 if API_KEY:
-    logging.info("✅ API Key successfully loaded.")
+    logging.debug("✅ API Key successfully loaded.")
 else:
     logging.error("❌ ERROR: API Key not found.")
 
 if DATABASE_URL:
-    logging.info("✅ Database URL successfully loaded.")
+    logging.debug("✅ Database URL successfully loaded.")
 else:
     logging.error("❌ ERROR: Database URL not found.")
 
