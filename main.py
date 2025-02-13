@@ -346,8 +346,8 @@ def recall_or_search():
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # If no parameters provided, return most recent memories
         if not search_term and not category:
+            # Return recent memories if no search parameters
             cursor.execute("""
                 SELECT title, details, categories, timestamp 
                 FROM memory 
@@ -355,64 +355,47 @@ def recall_or_search():
                 LIMIT 10;
             """)
         else:
-            query_parts = []
-            query_params = []
+            params = []
+            conditions = []
 
             if search_term:
-                # Simple but effective search across title and details
-                query_parts.extend([
-                    "title ILIKE %s",
-                    "details->>'text' ILIKE %s"
-                ])
-                search_pattern = f"%{search_term}%"
-                query_params.extend([search_pattern, search_pattern])
+                conditions.append("(title ILIKE %s OR details->>'text' ILIKE %s)")
+                params.extend([f"%{search_term}%", f"%{search_term}%"])
 
             if category:
-                if query_parts:
-                    query_parts.append("OR")
-                query_parts.append("%s = ANY(categories)")
-                query_params.append(category)
+                conditions.append("%s = ANY(categories)")
+                params.append(category)
 
-            query = f"""
+            query = """
                 SELECT title, details, categories, timestamp 
                 FROM memory 
-                WHERE {' OR '.join(query_parts)}
+                WHERE """ + " OR ".join(conditions) + """
                 ORDER BY timestamp DESC;
             """
-            cursor.execute(query, query_params)
 
-        search_results = cursor.fetchall()
-        total_count = len(search_results)
+            cursor.execute(query, params)
+
+        memories = []
+        for row in cursor.fetchall():
+            details = row[1]
+            if isinstance(details, str):
+                details = json.loads(details)
+
+            memories.append({
+                "title": row[0],
+                "details": details["text"] if isinstance(details, dict) and "text" in details else str(details),
+                "categories": row[2],
+                "timestamp": row[3].isoformat() if row[3] else None
+            })
 
         cursor.close()
         conn.close()
 
-        if not search_results:
-            if total_count == 0:
-                return jsonify({"message": "No memories found. The database is empty."}), 404
+        if not memories:
             return jsonify({
-                "message": f"No memories found matching '{search_term if search_term else category}'.",
+                "message": "No memories found matching your search.",
                 "suggestion": "Try a different search term or category."
             }), 404
-
-        # Convert results into JSON format
-        memories = []
-        for row in search_results:
-            try:
-                details = row[1]
-                if isinstance(details, str):
-                    details = json.loads(details)
-
-                memory = {
-                    "title": row[0],
-                    "details": details["text"] if isinstance(details, dict) and "text" in details else str(details),
-                    "categories": row[2],
-                    "timestamp": row[3].isoformat() if row[3] else None
-                }
-                memories.append(memory)
-            except Exception as e:
-                logging.error(f"Error parsing memory: {e}")
-                continue
 
         return jsonify({
             "memories": memories,
