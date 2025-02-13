@@ -309,9 +309,7 @@ def remember():
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
-    """Retrieve memories by title, details, or categories."""
-    # No authentication check here
-
+    """Retrieve memories by title, details, or categories, converting timestamps to Chicago time."""
     search_term = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
 
@@ -347,20 +345,23 @@ def recall_or_search():
                 WHERE """ + " OR ".join(conditions) + """
                 ORDER BY timestamp DESC;
             """
-
             cursor.execute(query, params)
 
         memories = []
+        chicago_tz = pytz.timezone("America/Chicago")
         for row in cursor.fetchall():
             details = row[1]
             if isinstance(details, str):
                 details = json.loads(details)
 
+            # Convert timestamp to Chicago time
+            timestamp_chicago = row[3].astimezone(chicago_tz) if row[3] else None
+
             memories.append({
                 "title": row[0],
                 "details": details["text"] if isinstance(details, dict) and "text" in details else str(details),
                 "categories": row[2],
-                "timestamp": row[3].isoformat() if row[3] else None
+                "timestamp": timestamp_chicago.isoformat() if timestamp_chicago else None
             })
 
         cursor.close()
@@ -382,48 +383,50 @@ def recall_or_search():
         return jsonify({"error": str(e)}), 500
 
 
+
 @app.route("/delete", methods=["DELETE"])
 def delete_memory():
-    """Delete a specific memory by title and timestamp."""
-    # No authentication check here
+    """Delete a specific memory by title. If multiple exist, deletes the most recent one."""
+    title = request.args.get("title")
+    if not title:
+        return jsonify({"error": "Missing title"}), 400
 
-    try:
-        title = request.args.get("title")
-        timestamp = request.args.get("timestamp")
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({"error": "Database connection failed"}), 500
 
-        if not title or not timestamp:
-            return jsonify({"error": "Missing title or timestamp"}), 400
+    cursor = conn.cursor()
 
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"error": "Database connection failed"}), 500
-
-        cursor = conn.cursor()
-
-        # Create backup before deletion
-        backup_database()
-
-        cursor.execute(
-            """
-            DELETE FROM memory 
-            WHERE title = %s AND timestamp = %s::timestamptz
-            """,
-            (title, timestamp)
-        )
-
-        # Check if any rows were deleted
-        deleted = cursor.rowcount > 0
-        conn.commit()
+    # Look up the most recent memory with the given title
+    cursor.execute("""
+        SELECT timestamp FROM memory 
+        WHERE title = %s 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    """, (title,))
+    result = cursor.fetchone()
+    if not result:
         cursor.close()
         conn.close()
+        return jsonify({"error": "Memory not found"}), 404
 
-        if deleted:
-            return jsonify({"message": f"Memory deleted: '{title}'"}), 200
-        else:
-            return jsonify({"error": "Memory not found"}), 404
+    # Use the stored timestamp without converting to Chicago time
+    stored_timestamp = result[0]
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    cursor.execute("""
+        DELETE FROM memory 
+        WHERE title = %s AND timestamp = %s::timestamptz
+    """, (title, stored_timestamp))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    if deleted:
+        return jsonify({"message": f"Memory deleted: '{title}'"}), 200
+    else:
+        return jsonify({"error": "Memory not found"}), 404
+
 
 ###############################################################################
 #                            MAIN APP RUN                                     #
