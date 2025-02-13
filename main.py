@@ -355,42 +355,30 @@ def recall_or_search():
                 LIMIT 10;
             """)
         else:
-            # Build search query based on provided parameters
             query_parts = []
             query_params = []
 
             if search_term:
-                # Make search more flexible
+                # Simple but effective search across title and details
                 query_parts.extend([
-                    "LOWER(title) LIKE LOWER(%s)",
-                    "LOWER(details->>'text') LIKE LOWER(%s)",
-                    "title ILIKE %s",  # Fallback for partial matches
-                    "details->>'text' ILIKE %s"  # Fallback for partial matches
+                    "title ILIKE %s",
+                    "details->>'text' ILIKE %s"
                 ])
                 search_pattern = f"%{search_term}%"
-                query_params.extend([search_pattern, search_pattern, search_pattern, search_pattern])
+                query_params.extend([search_pattern, search_pattern])
 
             if category:
                 if query_parts:
                     query_parts.append("OR")
                 query_parts.append("%s = ANY(categories)")
-                query_params.append(category.lower())
+                query_params.append(category)
 
             query = f"""
                 SELECT title, details, categories, timestamp 
                 FROM memory 
-                WHERE {' '.join(query_parts)}
-                ORDER BY 
-                    CASE 
-                        WHEN LOWER(title) LIKE LOWER(%s) THEN 0
-                        WHEN LOWER(details->>'text') LIKE LOWER(%s) THEN 1
-                        ELSE 2
-                    END,
-                    timestamp DESC;
+                WHERE {' OR '.join(query_parts)}
+                ORDER BY timestamp DESC;
             """
-            # Add search term twice more for the ORDER BY clause
-            query_params.extend([f"%{search_term}%", f"%{search_term}%"])
-
             cursor.execute(query, query_params)
 
         search_results = cursor.fetchall()
@@ -400,9 +388,11 @@ def recall_or_search():
         conn.close()
 
         if not search_results:
+            if total_count == 0:
+                return jsonify({"message": "No memories found. The database is empty."}), 404
             return jsonify({
-                "message": "No memories found. Try a different search term or category.",
-                "total_memories": total_count
+                "message": f"No memories found matching '{search_term if search_term else category}'.",
+                "suggestion": "Try a different search term or category."
             }), 404
 
         # Convert results into JSON format
