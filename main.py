@@ -340,59 +340,70 @@ def recall_or_search():
     search_term = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
 
-    if not search_term and not category:
-        return jsonify({"error": "No search term or category provided"}), 400
-
-    if category:
-        if category not in MemoryCategory.get_values():
-            return jsonify({
-                "error": f"Invalid category. Must be one of: {MemoryCategory.get_values()}"
-            }), 400
-
-    logging.info(f"🔍 Searching - Term: {search_term}, Category: {category}")
-
     try:
         conn = get_db_connection()
         if not conn:
             return jsonify({"error": "Database connection failed"}), 500
         cursor = conn.cursor()
 
-        # Build search query based on provided parameters
-        query_parts = []
-        query_params = []
+        # If no parameters provided, return most recent memories
+        if not search_term and not category:
+            cursor.execute("""
+                SELECT title, details, categories, timestamp 
+                FROM memory 
+                ORDER BY timestamp DESC
+                LIMIT 10;
+            """)
+        else:
+            # Build search query based on provided parameters
+            query_parts = []
+            query_params = []
 
-        if search_term:
-            query_parts.extend([
-                "title ILIKE %s",
-                "details->>'text' ILIKE %s"
-            ])
+            if search_term:
+                # Make search more flexible
+                query_parts.extend([
+                    "LOWER(title) LIKE LOWER(%s)",
+                    "LOWER(details->>'text') LIKE LOWER(%s)",
+                    "title ILIKE %s",  # Fallback for partial matches
+                    "details->>'text' ILIKE %s"  # Fallback for partial matches
+                ])
+                search_pattern = f"%{search_term}%"
+                query_params.extend([search_pattern, search_pattern, search_pattern, search_pattern])
+
+            if category:
+                if query_parts:
+                    query_parts.append("OR")
+                query_parts.append("%s = ANY(categories)")
+                query_params.append(category.lower())
+
+            query = f"""
+                SELECT title, details, categories, timestamp 
+                FROM memory 
+                WHERE {' '.join(query_parts)}
+                ORDER BY 
+                    CASE 
+                        WHEN LOWER(title) LIKE LOWER(%s) THEN 0
+                        WHEN LOWER(details->>'text') LIKE LOWER(%s) THEN 1
+                        ELSE 2
+                    END,
+                    timestamp DESC;
+            """
+            # Add search term twice more for the ORDER BY clause
             query_params.extend([f"%{search_term}%", f"%{search_term}%"])
 
-        if category:
-            query_parts.append("%s::memory_category = ANY(categories)")
-            query_params.append(category)
+            cursor.execute(query, query_params)
 
-        query = f"""
-            SELECT title, details, categories, timestamp 
-            FROM memory 
-            WHERE {' OR '.join(query_parts) if search_term else query_parts[0]}
-            ORDER BY timestamp DESC;
-        """
-
-        cursor.execute(query, query_params)
         search_results = cursor.fetchall()
-
-        cursor.execute("SELECT COUNT(*) FROM memory")
-        total_count = cursor.fetchone()[0]
-        logging.info(f"📊 Found {len(search_results)} results out of {total_count} total memories")
+        total_count = len(search_results)
 
         cursor.close()
         conn.close()
 
         if not search_results:
-            if total_count == 0:
-                return jsonify({"error": "Database is empty"}), 404
-            return jsonify({"error": f"No memories found matching search criteria"}), 404
+            return jsonify({
+                "message": "No memories found. Try a different search term or category.",
+                "total_memories": total_count
+            }), 404
 
         # Convert results into JSON format
         memories = []
@@ -413,7 +424,10 @@ def recall_or_search():
                 logging.error(f"Error parsing memory: {e}")
                 continue
 
-        return jsonify({"memories": memories}), 200
+        return jsonify({
+            "memories": memories,
+            "total_found": len(memories)
+        }), 200
 
     except Exception as e:
         logging.error(f"❌ ERROR in /recall-or-search: {str(e)}")
