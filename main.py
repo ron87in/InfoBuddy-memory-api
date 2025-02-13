@@ -236,30 +236,28 @@ def backup_database():
             cursor.close()
             conn.close()
     return None
-def check_api_key(req):
-    """Ensure the request has a valid API key."""
-    provided_key = req.headers.get("X-API-KEY")
-    if not API_KEY:
-        logging.error("❌ ERROR: API Key is missing.")
-        return False
-    if provided_key != API_KEY:
-        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
-        return False
-    return True
+
 
 ###############################################################################
 #                             CHECK API KEY                                     #
 ###############################################################################
 
 def check_api_key(req):
-    """Ensure the request has a valid API key."""
-    provided_key = req.headers.get("X-API-KEY")
-    if not API_KEY:
-        logging.error("❌ ERROR: API Key is missing.")
+    """Ensure the request has a valid API key via Bearer token."""
+    auth_header = req.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        logging.warning("🚨 Missing or invalid Authorization header")
         return False
+
+    provided_key = auth_header.split("Bearer ")[1].strip()
+    if not API_KEY:
+        logging.error("❌ ERROR: API Key is missing from environment.")
+        return False
+
     if provided_key != API_KEY:
         logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
         return False
+
     return True
 
 
