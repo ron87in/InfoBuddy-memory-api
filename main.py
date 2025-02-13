@@ -1,3 +1,4 @@
+
 import os
 import psycopg2
 import logging
@@ -10,8 +11,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from enum import Enum
 
+
 ###############################################################################
-#                             ENV & APP SETUP                                  #
+#                             ENV & APP SETUP                                   #
 ###############################################################################
 
 # Load environment variables
@@ -76,6 +78,7 @@ class MemoryCategory(Enum):
     def get_descriptions(cls):
         return {member.value['value']: member.value['description'] for member in cls}
 
+
 # Debugging confirmation
 if API_KEY:
     logging.info("✅ API Key successfully loaded.")
@@ -91,8 +94,9 @@ app = Flask(__name__)
 CORS(app)
 Swagger(app)
 
+
 ###############################################################################
-#                             DB CONNECTION                                   #
+#                             DB CONNECTION                                     #
 ###############################################################################
 
 def get_db_connection():
@@ -103,8 +107,9 @@ def get_db_connection():
         logging.error(f"❌ Database Connection Error: {str(e)}")
         return None
 
+
 ###############################################################################
-#                             INIT DB                                         #
+#                             INIT DB                                          #
 ###############################################################################
 
 def safe_init_db():
@@ -185,8 +190,9 @@ def safe_init_db():
     else:
         logging.error("❌ ERROR: Database initialization failed - couldn't connect.")
 
+
 ###############################################################################
-#                             BACKUP FUNCTIONS                                #
+#                             BACKUP FUNCTIONS                                  #
 ###############################################################################
 
 def backup_database():
@@ -231,8 +237,9 @@ def backup_database():
             conn.close()
     return None
 
+
 ###############################################################################
-#                             CHECK API KEY                                   #
+#                             CHECK API KEY                                     #
 ###############################################################################
 
 def check_api_key(req):
@@ -246,8 +253,9 @@ def check_api_key(req):
         return False
     return True
 
+
 ###############################################################################
-#                             MEMORY HANDLERS                                #
+#                             MEMORY HANDLERS                                   #
 ###############################################################################
 
 @app.route("/remember", methods=["POST"])
@@ -321,6 +329,7 @@ def remember():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
@@ -410,8 +419,9 @@ def recall_or_search():
         logging.error(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
+
 ###############################################################################
-#                             DELETE ENDPOINT                                 #
+#                             DELETE ENDPOINT                                   #
 ###############################################################################
 
 @app.route("/delete", methods=["DELETE"])
@@ -450,23 +460,19 @@ def delete_memory():
         cursor.close()
         conn.close()
 
-  deleted = cursor.fetchone()
-    conn.commit()
-    cursor.close()
-    conn.close()
+        if deleted:
+            return jsonify({"message": f"Memory deleted: '{title}'"}), 200
+        else:
+            return jsonify({"error": "Memory not found"}), 404
 
-    if deleted:
-        return jsonify({"message": f"Memory deleted: '{title}'"}), 200
-    else:
-        return jsonify({"error": "Memory not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-except Exception as e:
-    return jsonify({"error": str(e)}), 500
 
 ###############################################################################
-#                             MAIN APP RUN                                    #
+#                             MAIN APP RUN                                      #
 ###############################################################################
 
 if __name__ == "__main__":
-safe_init_db()  # Initialize database safely
-app.run(host="0.0.0.0", port=10000)
+    safe_init_db()  # Initialize database safely
+    app.run(host="0.0.0.0", port=10000)
