@@ -245,36 +245,42 @@ def backup_database():
 def check_api_key(req):
     """
     Ensure the request has a valid API key.
-    First, try to get the API key from the Authorization header as a Bearer token.
-    If not found, fall back to checking the X-API-KEY header.
+    It first looks for an Authorization header with a Bearer token (case-insensitive),
+    then falls back to the X-API-KEY header.
     """
     token = None
 
-    # Check for the Authorization header (Bearer token)
+    # Log the headers (for debugging purposes only)
+    logging.debug("Incoming Authorization header: %s", req.headers.get("Authorization"))
+    logging.debug("Incoming X-API-KEY header: %s", req.headers.get("X-API-KEY"))
+
+    # Check for the Authorization header (case-insensitive check)
     auth_header = req.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split("Bearer ")[1].strip()
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
 
     # Fallback: check for the X-API-KEY header if no Bearer token found
     if not token:
         token = req.headers.get("X-API-KEY")
 
-    # Log a warning if no token is provided
+    # Log if token is missing
     if not token:
         logging.warning("🚨 Missing API key in headers")
         return False
 
-    # Ensure the environment API key is loaded
-    if not API_KEY:
+    # Ensure the environment API key is loaded and trimmed
+    expected_key = API_KEY.strip() if API_KEY else None
+    if not expected_key:
         logging.error("❌ ERROR: API Key is missing from environment.")
         return False
 
     # Compare the provided token with the expected API key
-    if token != API_KEY:
-        logging.warning("🚨 API KEY MISMATCH - Unauthorized request")
+    if token != expected_key:
+        logging.warning("🚨 API KEY MISMATCH - Unauthorized request. Provided: %s", token)
         return False
 
     return True
+
 
 
 
