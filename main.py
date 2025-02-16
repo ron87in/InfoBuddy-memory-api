@@ -257,16 +257,21 @@ def check_api_key(req):
     if not token:
         token = req.args.get("api_key")
 
+    logging.debug("Token from request: %r", token)
+
     if not token:
         logging.warning("🚨 Missing API key in request (headers or query parameter).")
         return False
 
     expected_key = API_KEY.strip() if API_KEY else None
+    logging.debug("Expected API key: %r", expected_key)
+
     if token != expected_key:
         logging.warning("🚨 API key mismatch: provided token does not match expected key.")
         return False
 
     return True
+
 
 ###############################################################################
 #                             MEMORY HANDLERS                                  #
