@@ -78,9 +78,9 @@ class MemoryCategory(Enum):
 
 # Debugging confirmation
 if API_KEY:
-    logging.info("✅ API Key loaded (not used currently).")
+    logging.info("✅ API Key loaded.")
 else:
-    logging.info("❌ No API Key found (not used currently).")
+    logging.info("❌ No API Key found.")
 
 if DATABASE_URL:
     logging.info("✅ Database URL loaded.")
@@ -232,13 +232,51 @@ def backup_database():
     return None
 
 ###############################################################################
-#                             MEMORY HANDLERS                                 #
+#                         SECURITY FUNCTION                                    #
+###############################################################################
+
+def check_api_key(req):
+    """
+    Check that the request has a valid API key.
+    Looks first for a Bearer token in the Authorization header,
+    then for an X-API-KEY header,
+    and finally for an 'api_key' query parameter.
+    """
+    token = None
+
+    # 1. Check Authorization header (expecting "Bearer <token>")
+    auth_header = req.headers.get("Authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+
+    # 2. Fallback: Check X-API-KEY header
+    if not token:
+        token = req.headers.get("X-API-KEY")
+
+    # 3. Fallback: Check query parameter (e.g., ?api_key=YOUR_API_KEY)
+    if not token:
+        token = req.args.get("api_key")
+
+    if not token:
+        logging.warning("🚨 Missing API key in request (headers or query parameter).")
+        return False
+
+    expected_key = API_KEY.strip() if API_KEY else None
+    if token != expected_key:
+        logging.warning("🚨 API key mismatch: provided token does not match expected key.")
+        return False
+
+    return True
+
+###############################################################################
+#                             MEMORY HANDLERS                                  #
 ###############################################################################
 
 @app.route("/remember", methods=["POST"])
 def remember():
     """Store a memory with title, details, and multiple categories."""
-    # No authentication check here
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
 
     try:
         data = request.get_json()
@@ -258,7 +296,6 @@ def remember():
         # Validate categories
         valid_categories = MemoryCategory.get_values()
         categories = [cat.strip() for cat in categories]
-
         invalid_categories = [cat for cat in categories if cat not in valid_categories]
         if invalid_categories:
             return jsonify({
@@ -306,10 +343,12 @@ def remember():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/recall-or-search", methods=["GET"])
 def recall_or_search():
     """Retrieve memories by title, details, or categories, converting timestamps to Chicago time."""
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
+
     search_term = request.args.get("search", "").strip()
     category = request.args.get("category", "").strip()
 
@@ -382,11 +421,12 @@ def recall_or_search():
         logging.error(f"❌ ERROR in /recall-or-search: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-
-
 @app.route("/delete", methods=["DELETE"])
 def delete_memory():
     """Delete a specific memory by title. If multiple exist, deletes the most recent one."""
+    if not check_api_key(request):
+        return jsonify({"error": "Unauthorized"}), 403
+
     title = request.args.get("title")
     if not title:
         return jsonify({"error": "Missing title"}), 400
@@ -410,7 +450,6 @@ def delete_memory():
         conn.close()
         return jsonify({"error": "Memory not found"}), 404
 
-    # Use the stored timestamp without converting to Chicago time
     stored_timestamp = result[0]
 
     cursor.execute("""
@@ -427,9 +466,8 @@ def delete_memory():
     else:
         return jsonify({"error": "Memory not found"}), 404
 
-
 ###############################################################################
-#                            MAIN APP RUN                                     #
+#                             MAIN APP RUN                                     #
 ###############################################################################
 
 if __name__ == "__main__":
