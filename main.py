@@ -483,32 +483,21 @@ def edit_memory():
     Edit an existing memory.
 
     Identification:
-      - You can provide the original memory's title and (optionally) its timestamp
-        as query parameters.
-      - If the timestamp is omitted, the endpoint will search for the most recent
-        memory with that title.
+      Provide original_title and (optionally) original_timestamp as query parameters.
+      If original_timestamp is omitted, the most recent memory with that title is used.
 
     In the JSON body, include any fields to update:
       - title: New title (optional)
       - details: New details (optional; string or dict)
       - categories: New categories (optional; must be a list of valid category values)
       - timestamp: New timestamp (optional; to update the memory's timestamp)
-
-    Example usage:
-      PUT /edit?title=Favorite%20Drink
-      {
-        "title": "Absolute Favorite Drink",
-        "details": "Gin remains my favorite!",
-        "categories": ["hobbies_and_interests"],
-        "timestamp": "2025-02-15T12:00:00-06:00"
-      }
     """
     if not check_api_key(request):
         return jsonify({"error": "Unauthorized"}), 403
 
-    # Get the original memory title from query parameters
-    original_title = request.args.get("title")
-    original_timestamp_str = request.args.get("timestamp")  # optional
+    # Use the new query parameter names for identifying the memory.
+    original_title = request.args.get("original_title")
+    original_timestamp_str = request.args.get("original_timestamp")  # optional
 
     if not original_title:
         return jsonify({"error": "Missing original title to identify the memory"}), 400
@@ -518,7 +507,7 @@ def edit_memory():
         return jsonify({"error": "Database connection failed"}), 500
     cursor = conn.cursor()
 
-    # If timestamp isn't provided, search for the most recent memory with that title.
+    # If original_timestamp isn't provided, find the most recent memory with that title.
     if not original_timestamp_str:
         cursor.execute(
             """
@@ -539,14 +528,12 @@ def edit_memory():
             return jsonify({"error": "Memory not found for the given title"}), 404
     else:
         try:
-            # Validate provided timestamp format.
             original_timestamp = datetime.fromisoformat(original_timestamp_str)
         except ValueError:
             cursor.close()
             conn.close()
-            return jsonify({"error": "Invalid timestamp format in query parameter"}), 400
+            return jsonify({"error": "Invalid original timestamp format"}), 400
 
-    # Get update data from JSON body.
     data = request.get_json()
     if not data:
         cursor.close()
@@ -556,14 +543,13 @@ def edit_memory():
     new_title = data.get("title")
     new_details = data.get("details")
     new_categories = data.get("categories")
-    new_timestamp = data.get("timestamp")  # new value for timestamp
+    new_timestamp = data.get("timestamp")  # new timestamp for updating
 
     if new_title is None and new_details is None and new_categories is None and new_timestamp is None:
         cursor.close()
         conn.close()
         return jsonify({"error": "No update fields provided"}), 400
 
-    # Validate categories if provided.
     if new_categories is not None:
         if not isinstance(new_categories, list):
             cursor.close()
@@ -579,7 +565,6 @@ def edit_memory():
                 "error": f"Invalid categories: {invalid_categories}. Must be one or more of: {valid_categories}"
             }), 400
 
-    # If new timestamp is provided, validate its format.
     if new_timestamp is not None:
         try:
             new_timestamp_parsed = datetime.fromisoformat(new_timestamp)
@@ -588,7 +573,6 @@ def edit_memory():
             conn.close()
             return jsonify({"error": "Invalid new timestamp format"}), 400
 
-    # Build the UPDATE statement dynamically.
     update_parts = []
     values = []
 
@@ -621,7 +605,6 @@ def edit_memory():
         conn.close()
         return jsonify({"error": "No valid fields to update"}), 400
 
-    # Use the original title and timestamp (even if auto-found) to locate the record.
     query = f"""
         UPDATE memory
         SET {', '.join(update_parts)}
@@ -646,7 +629,6 @@ def edit_memory():
     cursor.close()
     conn.close()
 
-    # Optionally, create a backup after the successful update.
     backup_database()
 
     return jsonify({"message": "Memory updated successfully"}), 200
