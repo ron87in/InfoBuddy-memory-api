@@ -21,7 +21,7 @@ API_KEY = os.getenv("API_KEY")
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
@@ -78,14 +78,14 @@ class MemoryCategory(Enum):
 
 # Debugging confirmation
 if API_KEY:
-    logging.info("✅ API Key loaded.")
+    logging.debug("✅ API Key loaded.")
 else:
-    logging.info("❌ No API Key found.")
+    logging.debug("❌ No API Key found.")
 
 if DATABASE_URL:
-    logging.info("✅ Database URL loaded.")
+    logging.debug("✅ Database URL loaded.")
 else:
-    logging.error("❌ ERROR: Database URL not found.")
+    logging.debug("❌ ERROR: Database URL not found.")
 
 app = Flask(__name__)
 CORS(app)
